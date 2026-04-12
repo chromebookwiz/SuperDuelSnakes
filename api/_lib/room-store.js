@@ -9,6 +9,7 @@ const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 
 export async function createRoom(settings = {}, options = {}) {
   const backend = getBackend();
+  const opponentKind = normalizeOpponentKind(options.opponent);
 
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const roomCode = randomCode(6);
@@ -25,14 +26,14 @@ export async function createRoom(settings = {}, options = {}) {
       revision: 1,
       players: {
         player1: player1Token,
-        player2: options.opponent === 'bot' ? 'BOT_PLAYER2' : null,
+        player2: opponentKind === 'human' ? null : randomCode(24),
       },
       opponent: {
-        kind: options.opponent === 'bot' ? 'bot' : 'human',
+        kind: opponentKind,
         botPlayer: 'player2',
         botDifficulty: 'adaptive',
       },
-      events: [createEvent('room-created', { actor: 'system', opponent: options.opponent ?? 'human' }, now)],
+      events: [createEvent('room-created', { actor: 'system', opponent: opponentKind }, now)],
       history: [],
       match: createMatch(settings),
     };
@@ -63,7 +64,7 @@ export async function joinRoom(roomCode) {
     const synced = syncRoom(room);
     const now = Date.now();
 
-    if (synced.opponent?.kind !== 'bot' && !synced.players.player2) {
+    if (synced.opponent?.kind === 'human' && !synced.players.player2) {
       synced.players.player2 = randomCode(24);
       touchRoom(synced, now);
       pushEvent(synced, createEvent('player-joined', { actor: 'player2' }, now));
@@ -436,6 +437,10 @@ function cleanupExpiredRooms(store) {
 
 function normalizeRoomCode(roomCode) {
   return String(roomCode || '').trim().toUpperCase();
+}
+
+function normalizeOpponentKind(opponent) {
+  return opponent === 'bot' || opponent === 'agent' ? opponent : 'human';
 }
 
 function clampHistoryLimit(limit) {

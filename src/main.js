@@ -215,7 +215,8 @@ app.innerHTML = `
             <p>Create a hosted room, share the code, and play against a second browser through API-synced state.</p>
             <div class="room-grid">
               <button class="button button-primary" id="createRoomButton" type="button">Create Room</button>
-              <button class="button button-secondary" id="createBotRoomButton" type="button">Create Bot Room</button>
+              <button class="button button-secondary" id="createAgentRoomButton" type="button">Create Agent Room</button>
+              <button class="button button-secondary" id="createBotRoomButton" type="button">Create LLM v Bot</button>
               <div class="room-join-row">
                 <input class="text-input" id="roomCodeInput" type="text" maxlength="6" placeholder="ROOM CODE" />
                 <button class="button button-secondary" id="joinRoomButton" type="button">Join</button>
@@ -289,6 +290,7 @@ const elements = {
   statusNote: document.querySelector('#statusNote'),
   touchButtons: document.querySelectorAll('.touch-button'),
   createRoomButton: document.querySelector('#createRoomButton'),
+  createAgentRoomButton: document.querySelector('#createAgentRoomButton'),
   createBotRoomButton: document.querySelector('#createBotRoomButton'),
   roomCodeInput: document.querySelector('#roomCodeInput'),
   joinRoomButton: document.querySelector('#joinRoomButton'),
@@ -314,6 +316,7 @@ const roomSession = {
   role: 'local',
   backend: 'browser-local',
   opponent: 'local',
+  skillUrl: '',
   pollTimer: 0,
   lastSnapshot: null,
 };
@@ -1401,6 +1404,20 @@ function applyRoomSnapshot(room) {
   updateRoomMeta();
 }
 
+function describeAgentAccess(agentAccess) {
+  if (!agentAccess) {
+    return '';
+  }
+
+  return [
+    `mode: ${agentAccess.mode}`,
+    `room: ${agentAccess.roomCode}`,
+    `player: ${agentAccess.player}`,
+    `token: ${agentAccess.token}`,
+    `skill: ${agentAccess.skillUrl}`,
+  ].join('\n');
+}
+
 async function syncRoomFromApi() {
   if (!roomSession.active) {
     return;
@@ -1429,6 +1446,7 @@ function leaveRoomSession() {
   roomSession.role = 'local';
   roomSession.backend = 'browser-local';
   roomSession.opponent = 'local';
+  roomSession.skillUrl = '';
   roomSession.lastSnapshot = null;
   game.disableRemoteMode();
   game.resetRound();
@@ -1647,16 +1665,41 @@ elements.createRoomButton.addEventListener('click', async () => {
   }
 });
 
+elements.createAgentRoomButton.addEventListener('click', async () => {
+  try {
+    const payload = await createRoom(settings, { opponent: 'agent' });
+    roomSession.token = payload.token;
+    roomSession.role = payload.role;
+    roomSession.skillUrl = payload.skillUrl ?? '';
+    applyRoomSnapshot(payload.room);
+    startRoomPolling();
+    setStatus(`Agent room ${payload.room.roomCode} created.`);
+    clearStatusAfterDelay();
+    setApiLog([
+      payload.note || 'Agent room created.',
+      '',
+      describeAgentAccess(payload.agentAccess),
+    ].filter(Boolean).join('\n'));
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : 'Unable to create agent room.');
+  }
+});
+
 elements.createBotRoomButton.addEventListener('click', async () => {
   try {
     const payload = await createRoom(settings, { opponent: 'bot' });
     roomSession.token = payload.token;
     roomSession.role = payload.role;
+    roomSession.skillUrl = payload.skillUrl ?? '';
     applyRoomSnapshot(payload.room);
     startRoomPolling();
-    setStatus(`Bot room ${payload.room.roomCode} created.`);
+    setStatus(`LLM v Bot room ${payload.room.roomCode} created.`);
     clearStatusAfterDelay();
-    setApiLog('Bot room created. Player 2 is now controlled by the API bot.');
+    setApiLog([
+      payload.note || 'Bot room created.',
+      '',
+      describeAgentAccess(payload.agentAccess),
+    ].filter(Boolean).join('\n'));
   } catch (error) {
     setStatus(error instanceof Error ? error.message : 'Unable to create bot room.');
   }
@@ -1735,6 +1778,11 @@ elements.apiDocsButton.addEventListener('click', async () => {
     setApiLog([
       schema.name,
       `room storage: ${schema.roomStorage.durableBackend}`,
+      `skill: ${schema.skillUrl}`,
+      '',
+      'modes:',
+      `- human-vs-agent: ${schema.trainingModes.humanVsAgent}`,
+      `- llm-vs-bot: ${schema.trainingModes.llmVsBot}`,
       '',
       ...schema.commands,
     ].join('\n'));

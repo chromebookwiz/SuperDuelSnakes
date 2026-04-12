@@ -20,6 +20,8 @@ This repository now contains two versions of DuelSnakes:
 - Room revision numbers, expiry timestamps, and recent room events for better debugging and agent orchestration.
 - Bot room support for single-player sessions where player 2 is driven by the API.
 - Replay/history endpoint for recent room frames and event trails.
+- Explicit LLM training modes for human-vs-agent and LLM-vs-bot sessions.
+- A workspace skill file plus a hosted markdown playbook that an external agent can consume directly.
 
 ## Development
 
@@ -65,6 +67,16 @@ If those env vars are missing, the app still works, but rooms are ephemeral and 
 - `GET /api/rooms/state?roomCode=XXXXXX`
 - `GET /api/rooms/history?roomCode=XXXXXX&limit=40`
 - `POST /api/rooms/command`
+
+## Agent Playbooks
+
+- Workspace skill: `.github/skills/superduelsnakes-llm-player/SKILL.md`
+- Hosted playbook: `/skills/superduelsnakes-llm-playbook.md`
+
+## LLM Training Modes
+
+- `opponent: "agent"`: the browser user or local client plays player 1, and an external API client controls player 2 with the returned `agentAccess` token.
+- `opponent: "bot"`: an external API client controls player 1, and the integrated bot plays player 2.
 
 ## Room Model
 

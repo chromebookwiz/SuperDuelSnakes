@@ -42,7 +42,12 @@ export default async function handler(req, res) {
       'help',
     ],
     roomOptions: {
-      opponent: ['human', 'bot'],
+      opponent: ['human', 'bot', 'agent'],
+    },
+    skillUrl: '/skills/superduelsnakes-llm-playbook.md',
+    trainingModes: {
+      humanVsAgent: 'Create a room with opponent=agent. The browser user plays player1 and an external API client controls player2.',
+      llmVsBot: 'Create a room with opponent=bot. An external API client controls player1 against the integrated player2 bot.',
     },
     notes: [
       'Text and API flows return a machine-readable match snapshot and an ASCII board representation.',
@@ -51,6 +56,7 @@ export default async function handler(req, res) {
       'Without those env vars, the app falls back to in-memory rooms for local development and zero-config previews.',
       'Bot rooms reserve player 2 for an API-driven opponent that chooses safe food-seeking turns.',
       'Replay history is available from GET /api/rooms/history and includes recent room frames with ASCII board snapshots.',
+      'Agent rooms reserve player 2 for an external API caller and return an agentAccess payload with token, room code, and skill URL.',
     ],
   });
 }
