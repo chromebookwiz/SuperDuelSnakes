@@ -50,9 +50,11 @@ export default async function handler(req, res) {
         player1: ['human', 'bot', 'agent'],
         player2: ['human', 'bot', 'agent'],
       },
+      agentTiming: ['turn-based', 'realtime'],
       defaults: {
         player1: 'human',
         player2: 'human',
+        agentTiming: 'turn-based',
       },
     },
     skillUrl: '/skills/superduelsnakes-llm-playbook.md',
@@ -72,6 +74,7 @@ export default async function handler(req, res) {
       'Replay history is available from GET /api/rooms/history and includes recent room frames with ASCII board snapshots.',
       'Rooms with one or more agent seats return an agentAccess map containing the token for each API-controlled seat.',
       'Rooms with one or more agent seats use per-tick pacing: fetch /api/rooms/turn, choose a direction or stay, submit one response per pending agent seat, and the game advances exactly one tick.',
+      'Set agentTiming to realtime to keep the tick clock constant for agent rooms. In that mode the LLM still responds one tick at a time, but late responses miss the current tick instead of stalling the room.',
     ],
   });
 }

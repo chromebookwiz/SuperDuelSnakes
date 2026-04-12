@@ -21,7 +21,8 @@ Content-Type: application/json
   "playerModes": {
     "player1": "human",
     "player2": "agent"
-  }
+  },
+  "agentTiming": "turn-based"
 }
 ```
 
@@ -71,9 +72,35 @@ Content-Type: application/json
 
 The response contains both `agentAccess.player1` and `agentAccess.player2`.
 
+### Optional Real-Time Agent Timing
+
+If you want to test a constant wall-clock tick instead of the safe turn-waiting mode, create the room with:
+
+```http
+POST /api/rooms/create
+Content-Type: application/json
+
+{
+  "settings": {
+    "cellCount": 20,
+    "speed": 7,
+    "wrapWalls": false
+  },
+  "playerModes": {
+    "player1": "agent",
+    "player2": "bot"
+  },
+  "agentTiming": "realtime"
+}
+```
+
+This mode is still tick-based, but ticks continue at a constant rate. The agent gets a very limited window to answer each tick, and late responses miss that tick instead of pausing the room.
+
 ## Per-Tick Polling Loop
 
 Training rooms do not run on wall-clock speed. They advance once per LLM response.
+
+If `turn.mode` is `realtime-agent`, the room still exposes one tick at a time, but the tick clock does not wait for you.
 
 1. Fetch current turn state.
 2. If the room is waiting for your player, choose one response.
@@ -172,3 +199,4 @@ Use history to analyze:
 - Among safe moves, prefer shorter routes to food.
 - Avoid entering cells that can be occupied by the opponent on the next tick.
 - In training modes, each response resolves one tick, so latency affects throughput rather than causing missed frames.
+- In `realtime-agent` mode, latency can cause missed ticks because the room keeps advancing on the configured tick rate.

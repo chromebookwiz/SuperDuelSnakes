@@ -5,6 +5,7 @@ import { BACKDROP_STYLES, DEFAULT_SETTINGS, GRID_STYLES, THEMES } from './themes
 
 const SETTINGS_KEY = 'duelsnakes.arena.settings';
 const SCORE_KEY = 'duelsnakes.arena.score';
+const MUSIC_KEY = 'duelsnakes.arena.music';
 const MAX_FRAME_DELTA = 100;
 
 const app = document.querySelector('#app');
@@ -16,13 +17,21 @@ if (!app) {
 app.innerHTML = `
   <main class="shell">
     <header class="hero">
-      <section>
-        <p class="eyebrow">Browser rebuild with the original duel core</p>
-        <h1>SuperDuelSnakes Arena</h1>
+      <section class="hero-brand">
+        <p class="eyebrow">Original desktop art, music, and duel rules rebuilt for the browser</p>
+        <h1 class="sr-only">SuperDuelSnakes Arena</h1>
+        <img class="hero-logo" src="/original/title.png" alt="DuelSnakes" />
         <p class="lede">
-          Two players, one board, no mercy. This version keeps the head-to-head snake rules from the original desktop game,
-          then adds configurable arenas, richer visuals, responsive controls, and a deployable web build.
+          Two players, one board, no mercy. The web build now leads with the original logo, original soundtrack, and the
+          black-box arcade look of the desktop game, while keeping the expanded arena controls, room play, and API modes.
         </p>
+        <div class="hero-audio" aria-label="Music controls">
+          <button class="button button-secondary volume-button" id="musicToggleButton" type="button">Music 60%</button>
+          <label class="volume-control" for="musicVolume">
+            <span>Music Volume</span>
+            <input id="musicVolume" type="range" min="0" max="100" step="1" />
+          </label>
+        </div>
       </section>
       <section class="hero-meta">
         <article class="meta-card">
@@ -230,6 +239,13 @@ app.innerHTML = `
                   <option value="agent">LLM / API</option>
                 </select>
               </div>
+              <div class="toggle-row">
+                <label for="realtimeAgentTiming">Real time llm? (warning, probably won't work)</label>
+                <label class="switch">
+                  <input id="realtimeAgentTiming" type="checkbox" />
+                  <span class="slider"></span>
+                </label>
+              </div>
               <button class="button button-primary" id="createRoomButton" type="button">Create Configured Room</button>
               <div class="room-join-row">
                 <input class="text-input" id="roomCodeInput" type="text" maxlength="6" placeholder="ROOM CODE" />
@@ -279,6 +295,8 @@ const elements = {
   roundNumber: document.querySelector('#roundNumber'),
   streakLabel: document.querySelector('#streakLabel'),
   fullscreenButton: document.querySelector('#fullscreenButton'),
+  musicToggleButton: document.querySelector('#musicToggleButton'),
+  musicVolume: document.querySelector('#musicVolume'),
   togglePlayButton: document.querySelector('#togglePlayButton'),
   restartButton: document.querySelector('#restartButton'),
   canvas: document.querySelector('#gameCanvas'),
@@ -306,6 +324,7 @@ const elements = {
   createRoomButton: document.querySelector('#createRoomButton'),
   player1Controller: document.querySelector('#player1Controller'),
   player2Controller: document.querySelector('#player2Controller'),
+  realtimeAgentTiming: document.querySelector('#realtimeAgentTiming'),
   roomCodeInput: document.querySelector('#roomCodeInput'),
   joinRoomButton: document.querySelector('#joinRoomButton'),
   leaveRoomButton: document.querySelector('#leaveRoomButton'),
@@ -330,6 +349,7 @@ const roomSession = {
   role: 'local',
   backend: 'browser-local',
   controllers: { player1: 'human', player2: 'human' },
+  agentTiming: 'turn-based',
   skillUrl: '',
   pollTimer: 0,
   lastSnapshot: null,
@@ -337,6 +357,22 @@ const roomSession = {
 
 function loadSettings() {
   const parsed = readStoredJson(SETTINGS_KEY, {});
+  const isLegacyDefault = parsed &&
+    parsed.cellCount === 25 &&
+    parsed.speed === 6 &&
+    parsed.theme === 'neonNoir' &&
+    parsed.gridStyle === 'classic' &&
+    parsed.backdropStyle === 'aurora' &&
+    parsed.wrapWalls === false &&
+    parsed.showTrails === true &&
+    parsed.soundEnabled === true &&
+    parsed.screenShake === true &&
+    parsed.foodPulse === true;
+
+  if (isLegacyDefault) {
+    return sanitizeSettings(DEFAULT_SETTINGS);
+  }
+
   return sanitizeSettings({ ...DEFAULT_SETTINGS, ...parsed });
 }
 
@@ -350,6 +386,11 @@ function loadScore() {
     streakCount: Number.isFinite(parsed.streakCount) ? parsed.streakCount : 0,
     longestRoundMs: Number.isFinite(parsed.longestRoundMs) ? parsed.longestRoundMs : 0,
   };
+}
+
+function loadMusicSettings() {
+  const parsed = readStoredJson(MUSIC_KEY, {});
+  return sanitizeMusicSettings(parsed);
 }
 
 function sanitizeSettings(raw) {
@@ -381,6 +422,10 @@ function saveScore(score) {
   writeStoredJson(SCORE_KEY, score);
 }
 
+function saveMusicSettings(musicSettings) {
+  writeStoredJson(MUSIC_KEY, musicSettings);
+}
+
 function readStoredJson(key, fallback) {
   try {
     return JSON.parse(localStorage.getItem(key) ?? 'null') ?? fallback;
@@ -400,6 +445,15 @@ function writeStoredJson(key, value) {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function sanitizeMusicSettings(raw) {
+  const volume = Number(raw.volume);
+  const previousVolume = Number(raw.previousVolume);
+  return {
+    volume: Number.isFinite(volume) ? clamp(volume, 0, 1) : 0.6,
+    previousVolume: Number.isFinite(previousVolume) && previousVolume > 0 ? clamp(previousVolume, 0, 1) : 0.6,
+  };
 }
 
 function formatTime(milliseconds) {
@@ -432,6 +486,102 @@ function fillThemeSelect(select) {
   select.innerHTML = Object.entries(THEMES)
     .map(([value, theme]) => `<option value="${value}">${theme.label}</option>`)
     .join('');
+}
+
+const originalFoodSprite = new Image();
+originalFoodSprite.src = '/original/food.png';
+
+class MusicPlayer {
+  constructor(initialSettings) {
+    this.audio = new Audio('/original/music.mp3');
+    this.audio.loop = true;
+    this.audio.preload = 'auto';
+    this.audio.volume = initialSettings.volume;
+    this.previousVolume = initialSettings.previousVolume;
+    this.userGestureBound = false;
+    this.bindLifecycle();
+  }
+
+  bindLifecycle() {
+    this.audio.addEventListener('canplaythrough', () => {
+      if (this.audio.volume > 0) {
+        void this.play();
+      }
+    });
+
+    this.audio.addEventListener('ended', () => {
+      if (this.audio.volume <= 0) {
+        return;
+      }
+      this.audio.currentTime = 0;
+      void this.play();
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && this.audio.volume > 0) {
+        void this.play();
+      }
+    });
+
+    window.addEventListener('focus', () => {
+      if (this.audio.volume > 0) {
+        void this.play();
+      }
+    });
+  }
+
+  bindUserGesture() {
+    if (this.userGestureBound) {
+      return;
+    }
+
+    const unlock = () => {
+      if (this.audio.volume > 0) {
+        void this.play();
+      }
+    };
+
+    window.addEventListener('pointerdown', unlock, { passive: true });
+    window.addEventListener('keydown', unlock);
+    this.userGestureBound = true;
+  }
+
+  play() {
+    return this.audio.play().catch(() => {});
+  }
+
+  setVolume(volume) {
+    const nextVolume = clamp(volume, 0, 1);
+    this.audio.volume = nextVolume;
+    if (nextVolume > 0) {
+      this.previousVolume = nextVolume;
+      void this.play();
+    } else {
+      this.audio.pause();
+    }
+  }
+
+  toggleMute() {
+    if (this.audio.volume <= 0.001) {
+      this.setVolume(this.previousVolume || 0.6);
+      return;
+    }
+    this.setVolume(0);
+  }
+
+  getSettings() {
+    return {
+      volume: this.audio.volume,
+      previousVolume: this.previousVolume,
+    };
+  }
+
+  getButtonLabel() {
+    if (this.audio.volume <= 0.001) {
+      return 'Music Off';
+    }
+    return `Music ${Math.round(this.audio.volume * 100)}%`;
+  }
 }
 
 class AudioEngine {
@@ -1129,6 +1279,17 @@ class DuelSnakesGame {
     const centerX = x + cellSize / 2;
     const centerY = y + cellSize / 2;
     const pulse = this.settings.foodPulse ? 1 + Math.sin(timestamp * 0.006) * 0.08 : 1;
+    const spriteSize = cellSize * 0.94 * pulse;
+
+    if (originalFoodSprite.complete && originalFoodSprite.naturalWidth > 0) {
+      ctx.save();
+      ctx.shadowColor = theme.foodGlow;
+      ctx.shadowBlur = cellSize * 0.42;
+      ctx.drawImage(originalFoodSprite, centerX - spriteSize / 2, centerY - spriteSize / 2, spriteSize, spriteSize);
+      ctx.restore();
+      return;
+    }
+
     const radius = cellSize * 0.28 * pulse;
 
     ctx.save();
@@ -1292,6 +1453,12 @@ function updateForm(settings) {
   elements.speedValue.textContent = `${settings.speed} ticks/s`;
 }
 
+function updateMusicControls(music) {
+  const musicSettings = music.getSettings();
+  elements.musicVolume.value = String(Math.round(musicSettings.volume * 100));
+  elements.musicToggleButton.textContent = music.getButtonLabel();
+}
+
 function setStatus(message) {
   elements.statusNote.textContent = message;
 }
@@ -1334,8 +1501,13 @@ fillSelect(elements.backdropStyle, BACKDROP_STYLES);
 fillSelect(elements.gridStyle, GRID_STYLES);
 
 let settings = loadSettings();
+let musicSettings = loadMusicSettings();
 setThemeCss(settings.theme);
 updateForm(settings);
+
+const music = new MusicPlayer(musicSettings);
+music.bindUserGesture();
+updateMusicControls(music);
 
 const audio = new AudioEngine();
 audio.setEnabled(settings.soundEnabled);
@@ -1398,7 +1570,10 @@ function updateRoomMeta() {
   const controllerSummary = roomSession.active
     ? `${roomSession.controllers.player1} vs ${roomSession.controllers.player2}`
     : 'local';
-  elements.roomRole.textContent = `Role: ${roomSession.role} • Mode: ${controllerSummary}`;
+  const timingSummary = roomSession.active && hasAgentSeat(roomSession.controllers)
+    ? ` • Agent timing: ${roomSession.agentTiming === 'realtime' ? 'realtime' : 'turn-based'}`
+    : '';
+  elements.roomRole.textContent = `Role: ${roomSession.role} • Mode: ${controllerSummary}${timingSummary}`;
   const durability = roomSession.lastSnapshot?.durable ? 'durable' : roomSession.active ? 'ephemeral fallback' : 'browser-local';
   elements.roomBackend.textContent = `Backend: ${roomSession.backend} • ${durability}`;
 }
@@ -1416,9 +1591,25 @@ function applyRoomSnapshot(room) {
   roomSession.roomCode = room.roomCode;
   roomSession.backend = room.backend;
   roomSession.controllers = room.controllers ?? { player1: 'human', player2: 'human' };
+  roomSession.agentTiming = room.agentTiming ?? (room.turn?.mode === 'realtime-agent' ? 'realtime' : 'turn-based');
   game.applyRemoteSnapshot(room.match);
   renderTextBoard(room.match.boardText);
   updateRoomMeta();
+}
+
+function hasAgentSeat(controllers) {
+  return Object.values(controllers).includes('agent');
+}
+
+function updateAgentTimingToggle() {
+  const enabled = hasAgentSeat({
+    player1: elements.player1Controller.value,
+    player2: elements.player2Controller.value,
+  });
+  elements.realtimeAgentTiming.disabled = !enabled;
+  if (!enabled) {
+    elements.realtimeAgentTiming.checked = false;
+  }
 }
 
 function describeAgentAccess(agentAccess) {
@@ -1430,6 +1621,7 @@ function describeAgentAccess(agentAccess) {
     .map((entry) => [
       `player: ${entry.player}`,
       `token: ${entry.token}`,
+      `timing: ${entry.agentTiming}`,
       `skill: ${entry.skillUrl}`,
     ].join('\n'))
     .join('\n\n');
@@ -1463,6 +1655,7 @@ function leaveRoomSession() {
   roomSession.role = 'local';
   roomSession.backend = 'browser-local';
   roomSession.controllers = { player1: 'human', player2: 'human' };
+  roomSession.agentTiming = 'turn-based';
   roomSession.skillUrl = '';
   roomSession.lastSnapshot = null;
   game.disableRemoteMode();
@@ -1657,6 +1850,25 @@ elements.fullscreenButton.addEventListener('click', () => {
   toggleFullscreen();
 });
 
+elements.musicToggleButton.addEventListener('click', () => {
+  music.toggleMute();
+  musicSettings = sanitizeMusicSettings(music.getSettings());
+  saveMusicSettings(musicSettings);
+  updateMusicControls(music);
+});
+
+elements.musicVolume.addEventListener('input', (event) => {
+  const target = event.currentTarget;
+  if (!(target instanceof HTMLInputElement)) {
+    return;
+  }
+
+  music.setVolume(Number(target.value) / 100);
+  musicSettings = sanitizeMusicSettings(music.getSettings());
+  saveMusicSettings(musicSettings);
+  updateMusicControls(music);
+});
+
 elements.togglePlayButton.addEventListener('click', () => {
   handleTogglePlay();
 });
@@ -1669,14 +1881,17 @@ elements.restartButton.addEventListener('click', () => {
 
 elements.createRoomButton.addEventListener('click', async () => {
   try {
+    const agentTiming = elements.realtimeAgentTiming.checked ? 'realtime' : 'turn-based';
     const payload = await createRoom(settings, {
       playerModes: {
         player1: elements.player1Controller.value,
         player2: elements.player2Controller.value,
       },
+      agentTiming,
     });
     roomSession.token = payload.token;
     roomSession.role = payload.role;
+    roomSession.agentTiming = payload.agentTiming ?? agentTiming;
     roomSession.skillUrl = payload.skillUrl ?? '';
     applyRoomSnapshot(payload.room);
     startRoomPolling();
@@ -1691,6 +1906,9 @@ elements.createRoomButton.addEventListener('click', async () => {
     setStatus(error instanceof Error ? error.message : 'Unable to create room.');
   }
 });
+
+elements.player1Controller.addEventListener('change', updateAgentTimingToggle);
+elements.player2Controller.addEventListener('change', updateAgentTimingToggle);
 
 elements.joinRoomButton.addEventListener('click', async () => {
   const roomCode = elements.roomCodeInput.value.trim().toUpperCase();
@@ -1750,7 +1968,8 @@ elements.roomHistoryButton.addEventListener('click', async () => {
     setApiLog([
       `history for ${history.roomCode}`,
       `backend: ${history.backend}`,
-      `opponent: ${history.opponent?.kind ?? 'human'}`,
+      `controllers: ${history.controllers.player1} vs ${history.controllers.player2}`,
+      `agent timing: ${history.agentTiming ?? 'turn-based'}`,
       '',
       ...history.history.map((entry) => `r${entry.revision} ${entry.reason} ${entry.state} ${entry.winner ?? 'none'} ${entry.elapsedMs}ms`),
     ].join('\n'));
@@ -1773,6 +1992,7 @@ elements.apiDocsButton.addEventListener('click', async () => {
       `- llm-vs-llm: ${schema.trainingModes.llmVsLlm}`,
       `- bot-vs-bot: ${schema.trainingModes.botVsBot}`,
       `- human-vs-bot: ${schema.trainingModes.humanVsBot}`,
+      `- realtime-agent timing: ${schema.roomOptions.agentTiming.join(', ')}`,
       '',
       ...schema.commands,
     ].join('\n'));
@@ -1861,6 +2081,7 @@ window.addEventListener('keydown', (event) => {
 });
 
 updateRoomMeta();
+updateAgentTimingToggle();
 updateLocalTextBoard();
 setApiLog('Type help to inspect the text-command schema.');
 window.setInterval(() => {

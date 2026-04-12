@@ -8,10 +8,12 @@ const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL;
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 const PLAYER_KEYS = ['player1', 'player2'];
 const CONTROLLER_VALUES = ['human', 'bot', 'agent'];
+const AGENT_TIMING_VALUES = ['turn-based', 'realtime'];
 
 export async function createRoom(settings = {}, options = {}) {
   const backend = getBackend();
   const controllers = normalizeControllers(options);
+  const agentTiming = hasAgentControllers(controllers) ? normalizeAgentTiming(options.agentTiming) : 'turn-based';
 
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const roomCode = randomCode(6);
@@ -28,9 +30,10 @@ export async function createRoom(settings = {}, options = {}) {
       durable: backend.durable,
       revision: 1,
       controllers,
+      agentTiming,
       seats,
-      turn: createTurnState(controllers, now),
-      events: [createEvent('room-created', { actor: 'system', controllers }, now)],
+      turn: createTurnState(controllers, agentTiming, now),
+      events: [createEvent('room-created', { actor: 'system', controllers, agentTiming }, now)],
       history: [],
       match: createMatch(settings),
     };
@@ -101,6 +104,10 @@ export function syncRoom(room) {
     return room;
   }
 
+  if (room.turn.mode === 'realtime-agent') {
+    return syncRealtimeAgentRoom(room);
+  }
+
   const now = Date.now();
   const delta = now - room.lastAdvancedAt;
   if (delta > 0) {
@@ -146,6 +153,7 @@ export async function applyRoomCommand({ roomCode, token, action, commandText })
     }
 
     const mode = room.turn.mode;
+    const tracksAgentResponses = mode === 'per-tick' || mode === 'realtime-agent';
     for (const nextAction of actions) {
       const effectivePlayer = nextAction.player ?? role;
       if (nextAction.type === 'direction' || nextAction.type === 'stay' || nextAction.type === 'noop') {
@@ -161,11 +169,11 @@ export async function applyRoomCommand({ roomCode, token, action, commandText })
 
       if (nextAction.type === 'direction') {
         applyAction(room.match, { ...nextAction, player: effectivePlayer });
-        if (mode === 'per-tick' && room.controllers[effectivePlayer] === 'agent') {
+        if (tracksAgentResponses && room.controllers[effectivePlayer] === 'agent') {
           room.turn.responses[effectivePlayer] = true;
         }
       } else if (nextAction.type === 'stay' || nextAction.type === 'noop') {
-        if (mode === 'per-tick' && room.controllers[effectivePlayer] === 'agent') {
+        if (tracksAgentResponses && room.controllers[effectivePlayer] === 'agent') {
           room.turn.responses[effectivePlayer] = true;
         }
       } else {
@@ -210,6 +218,7 @@ export async function getRoomHistory(roomCode, limit = 40) {
     backend: room.backend,
     durable: Boolean(room.durable),
     controllers: room.controllers,
+    agentTiming: room.agentTiming,
     events: Array.isArray(room.events) ? room.events.slice(-safeLimit) : [],
     history: Array.isArray(room.history) ? room.history.slice(-safeLimit) : [],
   };
@@ -231,12 +240,24 @@ export async function getRoomTurn(roomCode, token) {
     durable: Boolean(room.durable),
     role,
     controllers: room.controllers,
+    agentTiming: room.agentTiming,
     turn: {
       mode: room.turn.mode,
       tickNumber: room.turn.tickNumber,
       pendingPlayers,
       pendingSince: room.turn.pendingSince,
-      readyForInput: Boolean(role && pendingPlayers.includes(role) && !room.turn.responses[role]),
+      deadlineAt: room.turn.mode === 'realtime-agent' && room.turn.pendingSince
+        ? room.turn.pendingSince + room.match.tickMs
+        : null,
+      timeRemainingMs: room.turn.mode === 'realtime-agent' && room.turn.pendingSince
+        ? Math.max(0, room.turn.pendingSince + room.match.tickMs - Date.now())
+        : null,
+      readyForInput: Boolean(
+        role &&
+        pendingPlayers.includes(role) &&
+        !room.turn.responses[role] &&
+        room.match.state === 'running'
+      ),
       allowStay: true,
     },
     observation: {
@@ -259,6 +280,7 @@ export function serializeRoom(room) {
     updatedAt: room.updatedAt,
     expiresAt: room.expiresAt,
     controllers: room.controllers,
+    agentTiming: room.agentTiming,
     players: {
       player1Ready: isSeatActive(room.seats.player1),
       player2Ready: isSeatActive(room.seats.player2),
@@ -322,10 +344,15 @@ function claimCreatorSeat(seats) {
 function initializeRoomState(room) {
   if (room.turn.mode === 'per-tick' || isBotOnlyRoom(room)) {
     applyAction(room.match, { type: 'start' });
+    return;
+  }
+
+  if (room.turn.mode === 'realtime-agent') {
+    applyAction(room.match, { type: 'start' });
   }
 }
 
-function createTurnState(controllers, now) {
+function createTurnState(controllers, agentTiming, now) {
   const pendingAgents = PLAYER_KEYS.filter((playerKey) => controllers[playerKey] === 'agent');
   if (pendingAgents.length === 0) {
     return {
@@ -335,6 +362,16 @@ function createTurnState(controllers, now) {
       responses: {},
     };
   }
+
+  if (agentTiming === 'realtime') {
+    return {
+      mode: 'realtime-agent',
+      tickNumber: 0,
+      pendingSince: now,
+      responses: {},
+    };
+  }
+
   return {
     mode: 'per-tick',
     tickNumber: 0,
@@ -344,7 +381,7 @@ function createTurnState(controllers, now) {
 }
 
 function getPendingPlayers(room) {
-  if (room.turn.mode !== 'per-tick') {
+  if (room.turn.mode !== 'per-tick' && room.turn.mode !== 'realtime-agent') {
     return [];
   }
   return PLAYER_KEYS.filter((playerKey) => room.controllers[playerKey] === 'agent');
@@ -362,7 +399,7 @@ function authorizeSeatAction(room, role, effectivePlayer, actionType, mode) {
   if (role !== effectivePlayer) {
     return `Token for ${role ?? 'spectator'} cannot control ${effectivePlayer}.`;
   }
-  if (mode === 'per-tick' && controller === 'agent' && room.turn.responses[effectivePlayer]) {
+  if ((mode === 'per-tick' || mode === 'realtime-agent') && controller === 'agent' && room.turn.responses[effectivePlayer]) {
     return `${effectivePlayer} has already responded for this tick.`;
   }
   if (mode === 'per-tick' && controller !== 'agent' && actionType !== 'direction') {
@@ -375,10 +412,37 @@ function canResolveTick(room) {
   return getPendingPlayers(room).every((playerKey) => room.turn.responses[playerKey]);
 }
 
-function advanceTurn(room) {
+function advanceTurn(room, timestamp = Date.now()) {
   room.turn.tickNumber += 1;
-  room.turn.pendingSince = Date.now();
+  room.turn.pendingSince = timestamp;
   room.turn.responses = {};
+}
+
+function syncRealtimeAgentRoom(room) {
+  const now = Date.now();
+  const delta = now - room.lastAdvancedAt;
+  if (delta <= 0) {
+    return room;
+  }
+
+  const wasRunning = room.match.state === 'running';
+  const previousTickNumber = room.turn.tickNumber;
+  if (wasRunning) {
+    advanceByTime(room.match, delta, {
+      onBeforeTick(currentMatch) {
+        planAllBots(room, currentMatch);
+      },
+      onAfterTick() {
+        advanceTurn(room);
+      },
+    });
+  }
+
+  touchRoom(room, now, { bumpRevision: wasRunning });
+  if (room.turn.tickNumber !== previousTickNumber) {
+    recordReplayFrame(room, 'tick-sync', now);
+  }
+  return room;
 }
 
 function isBotOnlyRoom(room) {
@@ -606,6 +670,14 @@ function normalizeControllers(options) {
     return { player1: 'agent', player2: 'bot' };
   }
   return { player1: 'human', player2: 'human' };
+}
+
+function normalizeAgentTiming(value) {
+  return AGENT_TIMING_VALUES.includes(value) ? value : 'turn-based';
+}
+
+function hasAgentControllers(controllers) {
+  return PLAYER_KEYS.some((playerKey) => controllers[playerKey] === 'agent');
 }
 
 function normalizeController(value) {

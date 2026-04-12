@@ -79,7 +79,10 @@ If those env vars are missing, the app still works, but rooms are ephemeral and 
 
 - Default room creation remains `human` vs `human`.
 - Any seat combination is supported through `playerModes`, including human vs human, human vs bot, bot vs bot, human vs agent, agent vs agent, and mixed agent/bot/human rooms.
-- Rooms with one or more `agent` seats advance one tick per agent-response cycle. The waiting agent should poll `/api/rooms/turn`, inspect the map info for the current tick, then answer with one direction or `stay`.
+- Rooms with one or more `agent` seats advance one tick per agent-response cycle. In practice, that makes LLM play feel more like a turn-based strategy mode than the default real-time duel.
+- That pacing exists because current hardware and inference latency are still the main constraint for live per-tick agent control. The waiting agent should poll `/api/rooms/turn`, inspect the map info for the current tick, then answer with one direction or `stay`.
+- With a fast enough model and inference path, true every-tick play should still be possible. A model burned directly to specialized hardware should be fast enough to move this mode much closer to continuous real-time control.
+- Room creation also accepts `agentTiming: "realtime"` for agent seats. That mode is still tick-based, but the tick clock stays constant, so the LLM has a very small response window and can miss ticks instead of stalling the game.
 
 ## Room Model
 
@@ -87,7 +90,8 @@ If those env vars are missing, the app still works, but rooms are ephemeral and 
 - Join codes are six characters.
 - The API returns backend metadata, a room revision, expiry timestamp, and recent room events.
 - Room history exposes recent replay frames with ASCII board snapshots for debugging, evaluation, or agent training.
-- Room creation accepts `opponent: "human" | "bot"`.
+- Room creation accepts `playerModes.player1` and `playerModes.player2`, with each seat independently set to `human`, `bot`, or `agent`.
+- Agent rooms may additionally set `agentTiming` to `turn-based` or `realtime`.
 - Durable Upstash writes are serialized with a short-lived room lock to avoid concurrent overwrite races on free-tier serverless execution.
 - The included fallback backend is in-memory for local development and zero-config previews.
 - On free-tier Vercel, durable multi-instance room state is supported through Upstash Redis REST credentials.

@@ -38,6 +38,14 @@ The default mode is `human` vs `human`.
 3. Each API client polls `/api/rooms/turn` with its own token.
 4. A tick resolves after all pending agent seats respond.
 
+### Optional Real-Time Agent Timing
+
+When creating any room with one or more `agent` seats, you may additionally set `"agentTiming": "realtime"`.
+
+- `turn-based`: the safe default, where the room waits for the pending agent response before advancing.
+- `realtime`: still tick-based, but the room advances on a constant clock and the agent has a very small response window for each tick.
+- In `realtime` mode, a slow response misses the current tick instead of stalling the room.
+
 ## Core Endpoints
 
 - `GET /api/play/schema`
@@ -102,6 +110,8 @@ You may also send structured actions:
 5. Submit exactly one response with `POST /api/rooms/command`.
 6. The room advances exactly one tick after all pending agent seats for that tick have responded.
 7. Repeat until `winner` is no longer `none`.
+
+If `turn.mode` is `realtime-agent`, keep polling and respond as fast as possible. The room still exposes per-tick state, but it no longer waits for the model before advancing.
 
 ## Response Contract
 

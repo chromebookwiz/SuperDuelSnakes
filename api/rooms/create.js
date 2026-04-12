@@ -20,6 +20,7 @@ export default async function handler(req, res) {
     const created = await createRoom(body.settings ?? {}, {
       opponent: body.opponent,
       playerModes: body.playerModes,
+      agentTiming: body.agentTiming,
     });
     const agentAccess = Object.fromEntries(
       Object.entries(created.room.controllers)
@@ -29,6 +30,7 @@ export default async function handler(req, res) {
           controller,
           roomCode: created.room.roomCode,
           token: created.room.seats[player].token,
+          agentTiming: created.room.agentTiming,
           skillUrl,
         }]),
     );
@@ -40,10 +42,11 @@ export default async function handler(req, res) {
       token: created.token,
       role: created.role,
       skillUrl,
+      agentTiming: created.room.agentTiming,
       agentAccess: Object.keys(agentAccess).length > 0 ? agentAccess : null,
       note: created.room.durable
-        ? `Room created in ${modeLabel} mode with durable Upstash-backed storage.`
-        : `Room created in ${modeLabel} mode. Configure Upstash Redis env vars to make it durable on free-tier Vercel.`,
+        ? `Room created in ${modeLabel} mode with ${created.room.agentTiming} agent timing and durable Upstash-backed storage.`
+        : `Room created in ${modeLabel} mode with ${created.room.agentTiming} agent timing. Configure Upstash Redis env vars to make it durable on free-tier Vercel.`,
     });
   } catch (error) {
     sendJson(res, 400, { error: error instanceof Error ? error.message : 'Unable to create room.' });

@@ -213,6 +213,7 @@ export function advanceByTime(match, deltaMs, hooks = {}) {
     hooks.onBeforeTick?.(match);
     stepMatch(match);
     match.accumulatorMs -= match.tickMs;
+    hooks.onAfterTick?.(match);
     if (match.state !== 'running') {
       match.accumulatorMs = 0;
       break;
