@@ -15,116 +15,88 @@ if (!app) {
 }
 
 app.innerHTML = `
-  <main class="shell">
-    <header class="hero">
-      <section class="hero-brand">
-        <p class="eyebrow">Original desktop art, music, and duel rules rebuilt for the browser</p>
-        <h1 class="sr-only">SuperDuelSnakes Arena</h1>
-        <img class="hero-logo" src="/original/title.png" alt="DuelSnakes" />
-        <p class="lede">
-          Two players, one board, no mercy. The web build now leads with the original logo, original soundtrack, and the
-          black-box arcade look of the desktop game, while keeping the expanded arena controls, room play, and API modes.
-        </p>
-        <div class="hero-audio" aria-label="Music controls">
-          <button class="button button-secondary volume-button" id="musicToggleButton" type="button">Music 60%</button>
-          <label class="volume-control" for="musicVolume">
-            <span>Music Volume</span>
-            <input id="musicVolume" type="range" min="0" max="100" step="1" />
+  <main class="shell game-shell">
+    <div class="corner-ui">
+      <div class="room-badge ${''}" id="roomStatus"></div>
+      <div class="music-dock" aria-label="Music controls">
+        <button class="button button-ghost music-button" id="musicToggleButton" type="button">Music 60%</button>
+        <input id="musicVolume" type="range" min="0" max="100" step="1" aria-label="Music volume" />
+      </div>
+    </div>
+
+    <section class="screen screen-home is-active" id="homeView" data-screen="home">
+      <h1 class="sr-only">SuperDuelSnakes Arena</h1>
+      <img class="home-logo" src="/original/title.png" alt="DuelSnakes" />
+      <div class="menu-stack">
+        <button class="menu-button" id="homePlayButton" type="button">Play</button>
+        <button class="menu-button" id="homeAutomateButton" type="button">Automate</button>
+        <button class="menu-button" id="homeCreateRoomButton" type="button">Create Room</button>
+        <button class="menu-button" id="homeSettingsButton" type="button">Settings</button>
+      </div>
+    </section>
+
+    <section class="screen screen-menu" id="playView" data-screen="play">
+      <div class="menu-panel">
+        <p class="screen-kicker">Play</p>
+        <h2>Choose a duel</h2>
+        <p class="screen-copy">Keep it immediate. Start a local head-to-head match or launch a bot duel.</p>
+        <div class="menu-stack">
+          <button class="menu-button" id="playHumanButton" type="button">Human v Human</button>
+          <button class="menu-button" id="playBotButton" type="button">Human v Bot</button>
+        </div>
+        <button class="button button-ghost back-button" id="backFromPlayButton" type="button">Back</button>
+      </div>
+    </section>
+
+    <section class="screen screen-menu" id="automationView" data-screen="automation">
+      <div class="menu-panel automation-panel">
+        <p class="screen-kicker">Automate</p>
+        <h2>LLM and API modes</h2>
+        <p class="screen-copy">Agent modes live here. Use the presets to launch fast, then use the sandbox below to inspect state, send commands, and analyze runs.</p>
+        <div class="toggle-row automation-toggle">
+          <label for="automationRealtimeAgentTiming">Real time llm? (warning, probably won't work)</label>
+          <label class="switch">
+            <input id="automationRealtimeAgentTiming" type="checkbox" />
+            <span class="slider"></span>
           </label>
         </div>
-      </section>
-      <section class="hero-meta">
-        <article class="meta-card">
-          <span class="meta-label">Player 1</span>
-          <span class="meta-value" id="p1Score">0</span>
-          <p class="meta-subtext">WASD controls</p>
-        </article>
-        <article class="meta-card">
-          <span class="meta-label">Player 2</span>
-          <span class="meta-value" id="p2Score">0</span>
-          <p class="meta-subtext">Arrow keys</p>
-        </article>
-        <article class="meta-card">
-          <span class="meta-label">Draws</span>
-          <span class="meta-value" id="drawScore">0</span>
-          <p class="meta-subtext">Head-on collisions count</p>
-        </article>
-        <article class="meta-card">
-          <span class="meta-label">Round Clock</span>
-          <span class="meta-value" id="roundClock">00:00</span>
-          <p class="meta-subtext" id="arenaSummary">25x25 arena at 6 tps</p>
-        </article>
-      </section>
-    </header>
-
-    <section class="main-grid">
-      <section class="stage-panel">
-        <div class="stage-toolbar">
-          <div class="toolbar-group">
-            <div class="pill"><strong id="stateLabel">Stopped</strong></div>
-            <div class="pill">Theme <strong id="themeLabel">Neon Noir</strong></div>
-            <div class="pill">Round <strong id="roundNumber">0</strong></div>
-            <div class="pill">Streak <strong id="streakLabel">None</strong></div>
-          </div>
-          <div class="toolbar-group">
-            <button class="button button-secondary" id="fullscreenButton" type="button">Fullscreen</button>
-            <button class="button button-primary" id="togglePlayButton" type="button">Start Round</button>
-            <button class="button button-secondary" id="restartButton" type="button">Reset Round</button>
-          </div>
+        <div class="menu-grid">
+          <button class="menu-button" id="automationPlayVsAgentButton" type="button">Play v Agent</button>
+          <button class="menu-button" id="automationAgentVsBotButton" type="button">Agent v Bot</button>
+          <button class="menu-button" id="automationAgentVsAgentButton" type="button">Agent v Agent</button>
         </div>
-
-        <div class="canvas-shell" id="canvasShell">
-          <canvas class="board-canvas" id="gameCanvas"></canvas>
-          <div class="canvas-overlay" id="canvasOverlay"></div>
-        </div>
-
-        <div class="stage-footer">
-          <article class="footer-card">
-            <span>Controls</span>
-            <strong>WASD and Arrow Keys</strong>
-          </article>
-          <article class="footer-card">
-            <span>Quick Actions</span>
-            <strong>Space to pause, R to reset</strong>
-          </article>
-          <article class="footer-card">
-            <span>Rule Set</span>
-            <strong>Wall and body collisions decide the duel</strong>
-          </article>
-        </div>
-
-        <section class="touch-panel" aria-label="Touch controls">
-          <div class="touch-card">
-            <span>Player 1 Touch</span>
-            <div class="touch-grid" data-player="1">
-              <button class="touch-button touch-up" data-player="1" data-direction="up" type="button" aria-label="Player 1 up">▲</button>
-              <button class="touch-button touch-left" data-player="1" data-direction="left" type="button" aria-label="Player 1 left">◀</button>
-              <button class="touch-button touch-right" data-player="1" data-direction="right" type="button" aria-label="Player 1 right">▶</button>
-              <button class="touch-button touch-down" data-player="1" data-direction="down" type="button" aria-label="Player 1 down">▼</button>
-            </div>
+        <section class="sandbox-panel">
+          <p class="screen-kicker">Sandbox</p>
+          <div class="room-join-row">
+            <input class="text-input" id="textCommandInput" type="text" placeholder="Examples: start, p1 up, p2 left, pause, reset" />
+            <button class="button button-solid" id="sendCommandButton" type="button">Send</button>
           </div>
-          <div class="touch-card">
-            <span>Player 2 Touch</span>
-            <div class="touch-grid" data-player="2">
-              <button class="touch-button touch-up" data-player="2" data-direction="up" type="button" aria-label="Player 2 up">▲</button>
-              <button class="touch-button touch-left" data-player="2" data-direction="left" type="button" aria-label="Player 2 left">◀</button>
-              <button class="touch-button touch-right" data-player="2" data-direction="right" type="button" aria-label="Player 2 right">▶</button>
-              <button class="touch-button touch-down" data-player="2" data-direction="down" type="button" aria-label="Player 2 down">▼</button>
-            </div>
+          <div class="actions automation-actions">
+            <button class="button button-ghost" id="refreshTextButton" type="button">Refresh Snapshot</button>
+            <button class="button button-ghost" id="roomHistoryButton" type="button">Room History</button>
+            <button class="button button-ghost" id="apiDocsButton" type="button">API Schema</button>
           </div>
+          <pre class="terminal-board" id="textBoard"></pre>
+          <pre class="api-log" id="apiLog"></pre>
         </section>
-      </section>
+        <button class="button button-ghost back-button" id="backFromAutomationButton" type="button">Back</button>
+      </div>
+    </section>
 
-      <aside class="settings-panel">
-        <h2 class="panel-title">Advanced Arena Settings</h2>
-        <p class="panel-copy">
-          Tune board size, speed, wrap rules, effects, and the entire visual atmosphere. Theme and background changes apply live.
-        </p>
+    <section class="screen screen-config" id="configView" data-screen="config">
+      <div class="config-shell">
+        <div class="config-header">
+          <div>
+            <p class="screen-kicker" id="configKicker">Settings</p>
+            <h2 id="configTitle">Tune the arena</h2>
+            <p class="screen-copy" id="configCopy">Adjust the board, speed, and match options.</p>
+          </div>
+          <button class="button button-ghost back-button" id="backFromConfigButton" type="button">Back</button>
+        </div>
 
-        <form class="settings-form" id="settingsForm">
+        <form class="settings-form mono-form" id="settingsForm">
           <section class="settings-group">
-            <h3>Gameplay</h3>
-            <p>Keep the original duel intact, but make the arena fit the session.</p>
+            <h3>Match Rules</h3>
             <div class="control-grid">
               <div class="control-row">
                 <div class="range-label">
@@ -140,32 +112,6 @@ app.innerHTML = `
                 </div>
                 <input id="speed" name="speed" type="range" min="4" max="16" step="1" />
               </div>
-            </div>
-          </section>
-
-          <section class="settings-group">
-            <h3>Theme and Board</h3>
-            <p>Swap the whole visual identity, then change the board texture under it.</p>
-            <div class="control-grid">
-              <div class="control-row">
-                <label for="theme">Theme</label>
-                <select id="theme" name="theme"></select>
-              </div>
-              <div class="control-row">
-                <label for="backdropStyle">Background Scene</label>
-                <select id="backdropStyle" name="backdropStyle"></select>
-              </div>
-              <div class="control-row">
-                <label for="gridStyle">Grid Background</label>
-                <select id="gridStyle" name="gridStyle"></select>
-              </div>
-            </div>
-          </section>
-
-          <section class="settings-group">
-            <h3>Enhancements</h3>
-            <p>Add useful options without changing the default competitive rules.</p>
-            <div class="toggle-list">
               <div class="toggle-row">
                 <label for="wrapWalls">Wrap arena walls</label>
                 <label class="switch">
@@ -173,20 +119,40 @@ app.innerHTML = `
                   <span class="slider"></span>
                 </label>
               </div>
+            </div>
+          </section>
+
+          <section class="settings-group">
+            <h3>Presentation</h3>
+            <div class="control-grid">
+              <div class="control-row">
+                <label for="gridStyle">Grid Style</label>
+                <select id="gridStyle" name="gridStyle"></select>
+              </div>
               <div class="toggle-row">
-                <label for="showTrails">Head glow trails</label>
+                <label for="showTrails">Head trails</label>
                 <label class="switch">
                   <input id="showTrails" name="showTrails" type="checkbox" />
                   <span class="slider"></span>
                 </label>
               </div>
               <div class="toggle-row">
-                <label for="foodPulse">Animated food pulse</label>
+                <label for="foodPulse">Food pulse</label>
                 <label class="switch">
                   <input id="foodPulse" name="foodPulse" type="checkbox" />
                   <span class="slider"></span>
                 </label>
               </div>
+              <div class="hidden-config">
+                <select id="theme" name="theme"></select>
+                <select id="backdropStyle" name="backdropStyle"></select>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-group">
+            <h3>Effects</h3>
+            <div class="control-grid">
               <div class="toggle-row">
                 <label for="soundEnabled">Sound effects</label>
                 <label class="switch">
@@ -195,7 +161,7 @@ app.innerHTML = `
                 </label>
               </div>
               <div class="toggle-row">
-                <label for="screenShake">Impact screen shake</label>
+                <label for="screenShake">Screen shake</label>
                 <label class="switch">
                   <input id="screenShake" name="screenShake" type="checkbox" />
                   <span class="slider"></span>
@@ -204,25 +170,9 @@ app.innerHTML = `
             </div>
           </section>
 
-          <section class="settings-group">
-            <h3>Utility</h3>
-            <p>Apply structural changes, shuffle the look, or clear the running match score.</p>
-            <div class="actions">
-              <button class="button button-primary" id="applySettingsButton" type="button">Apply Arena Changes</button>
-              <button class="button button-secondary" id="randomThemeButton" type="button">Randomize Look</button>
-              <button class="button button-secondary" id="resetScoresButton" type="button">Reset Scores</button>
-            </div>
-            <p class="pending-note" id="pendingNote"></p>
-            <p class="pending-note pending-note-muted" id="statusNote"></p>
-            <p class="control-hint">
-              Structural settings like board size and wrap mode restart the round. Speed and visual settings update immediately.
-            </p>
-          </section>
-
-          <section class="settings-group">
-            <h3>Network Rooms</h3>
-            <p>Create a hosted room with any human, bot, or API-controlled seat combination. Human versus human stays the default.</p>
-            <div class="room-grid">
+          <section class="settings-group" id="roomSetupSection">
+            <h3>Create Room</h3>
+            <div class="control-grid">
               <div class="control-row">
                 <label for="player1Controller">Player 1 Controller</label>
                 <select id="player1Controller">
@@ -246,45 +196,116 @@ app.innerHTML = `
                   <span class="slider"></span>
                 </label>
               </div>
-              <button class="button button-primary" id="createRoomButton" type="button">Create Configured Room</button>
+            </div>
+            <div class="room-actions" id="roomActions">
+              <button class="button button-solid" id="createRoomButton" type="button">Create Room</button>
               <div class="room-join-row">
                 <input class="text-input" id="roomCodeInput" type="text" maxlength="6" placeholder="ROOM CODE" />
-                <button class="button button-secondary" id="joinRoomButton" type="button">Join</button>
+                <button class="button button-ghost" id="joinRoomButton" type="button">Join</button>
               </div>
-              <button class="button button-secondary" id="leaveRoomButton" type="button">Leave Room</button>
+              <button class="button button-ghost" id="leaveRoomButton" type="button">Leave Room</button>
             </div>
-            <div class="room-meta">
-              <span id="roomStatus">No active room</span>
-              <span id="roomRole">Role: local</span>
-              <span id="roomBackend">Backend: browser-local</span>
-            </div>
-            <p class="control-hint">
-              This repository implements server-relayed room sync. True direct peer-to-peer transport would require additional signaling infrastructure.
-            </p>
           </section>
 
-          <section class="settings-group">
-            <h3>Text and API Play</h3>
-            <p>Drive the game with text commands, inspect the ASCII board, and expose a machine-friendly state for external agents.</p>
-            <div class="room-join-row">
-              <input class="text-input" id="textCommandInput" type="text" placeholder="Examples: start, p1 up, p2 left, pause, reset" />
-              <button class="button button-primary" id="sendCommandButton" type="button">Send</button>
+          <section class="settings-group" id="settingsActionsSection">
+            <h3>System</h3>
+            <div class="actions vertical-actions">
+              <button class="button button-solid" id="applySettingsButton" type="button">Apply Settings</button>
+              <button class="button button-ghost" id="resetScoresButton" type="button">Reset Scores</button>
+              <button class="button button-ghost visually-hidden" id="randomThemeButton" type="button">Randomize Look</button>
             </div>
-            <div class="actions">
-              <button class="button button-secondary" id="refreshTextButton" type="button">Refresh Snapshot</button>
-              <button class="button button-secondary" id="roomHistoryButton" type="button">Room History</button>
-              <button class="button button-secondary" id="apiDocsButton" type="button">API Schema</button>
-            </div>
-            <pre class="terminal-board" id="textBoard"></pre>
-            <pre class="api-log" id="apiLog"></pre>
           </section>
+
+          <p class="pending-note" id="pendingNote"></p>
+          <p class="pending-note pending-note-muted" id="statusNote"></p>
         </form>
-      </aside>
+      </div>
+    </section>
+
+    <section class="screen screen-game" id="gameView" data-screen="game">
+      <div class="game-layout">
+        <div class="game-header">
+          <div class="hud-grid">
+            <article class="hud-card"><span>P1</span><strong id="p1Score">0</strong></article>
+            <article class="hud-card"><span>P2</span><strong id="p2Score">0</strong></article>
+            <article class="hud-card"><span>Draws</span><strong id="drawScore">0</strong></article>
+            <article class="hud-card"><span>Clock</span><strong id="roundClock">00:00</strong></article>
+          </div>
+          <div class="game-top-actions">
+            <button class="button button-ghost" id="returnHomeButton" type="button">Menu</button>
+            <button class="button button-ghost" id="fullscreenButton" type="button">Fullscreen</button>
+            <button class="button button-solid" id="togglePlayButton" type="button">Start Round</button>
+            <button class="button button-ghost" id="restartButton" type="button">Reset Round</button>
+          </div>
+        </div>
+
+        <div class="game-meta">
+          <div class="pill"><strong id="stateLabel">Stopped</strong></div>
+          <div class="pill">Theme <strong id="themeLabel">Original Arcade</strong></div>
+          <div class="pill">Round <strong id="roundNumber">0</strong></div>
+          <div class="pill">Streak <strong id="streakLabel">None</strong></div>
+          <div class="pill" id="roomRole">Role: local</div>
+          <div class="pill" id="roomBackend">Backend: browser-local</div>
+          <div class="pill" id="arenaSummary">25x25 arena at 6 tps</div>
+        </div>
+
+        <div class="canvas-shell" id="canvasShell">
+          <canvas class="board-canvas" id="gameCanvas"></canvas>
+          <div class="canvas-overlay" id="canvasOverlay"></div>
+        </div>
+
+        <div class="game-instructions">
+          <div class="instruction-card"><span>Controls</span><strong>WASD / Arrow Keys</strong></div>
+          <div class="instruction-card"><span>Quick Keys</span><strong>Space to pause, R to reset</strong></div>
+          <div class="instruction-card"><span>Mode</span><strong>Arcade duel</strong></div>
+        </div>
+
+        <section class="touch-panel" aria-label="Touch controls">
+          <div class="touch-card">
+            <span>Player 1</span>
+            <div class="touch-grid" data-player="1">
+              <button class="touch-button touch-up" data-player="1" data-direction="up" type="button" aria-label="Player 1 up">▲</button>
+              <button class="touch-button touch-left" data-player="1" data-direction="left" type="button" aria-label="Player 1 left">◀</button>
+              <button class="touch-button touch-right" data-player="1" data-direction="right" type="button" aria-label="Player 1 right">▶</button>
+              <button class="touch-button touch-down" data-player="1" data-direction="down" type="button" aria-label="Player 1 down">▼</button>
+            </div>
+          </div>
+          <div class="touch-card">
+            <span>Player 2</span>
+            <div class="touch-grid" data-player="2">
+              <button class="touch-button touch-up" data-player="2" data-direction="up" type="button" aria-label="Player 2 up">▲</button>
+              <button class="touch-button touch-left" data-player="2" data-direction="left" type="button" aria-label="Player 2 left">◀</button>
+              <button class="touch-button touch-right" data-player="2" data-direction="right" type="button" aria-label="Player 2 right">▶</button>
+              <button class="touch-button touch-down" data-player="2" data-direction="down" type="button" aria-label="Player 2 down">▼</button>
+            </div>
+          </div>
+        </section>
+      </div>
     </section>
   </main>
 `;
 
 const elements = {
+  screens: document.querySelectorAll('[data-screen]'),
+  homePlayButton: document.querySelector('#homePlayButton'),
+  homeAutomateButton: document.querySelector('#homeAutomateButton'),
+  homeCreateRoomButton: document.querySelector('#homeCreateRoomButton'),
+  homeSettingsButton: document.querySelector('#homeSettingsButton'),
+  playHumanButton: document.querySelector('#playHumanButton'),
+  playBotButton: document.querySelector('#playBotButton'),
+  backFromPlayButton: document.querySelector('#backFromPlayButton'),
+  automationPlayVsAgentButton: document.querySelector('#automationPlayVsAgentButton'),
+  automationAgentVsBotButton: document.querySelector('#automationAgentVsBotButton'),
+  automationAgentVsAgentButton: document.querySelector('#automationAgentVsAgentButton'),
+  automationRealtimeAgentTiming: document.querySelector('#automationRealtimeAgentTiming'),
+  backFromAutomationButton: document.querySelector('#backFromAutomationButton'),
+  configKicker: document.querySelector('#configKicker'),
+  configTitle: document.querySelector('#configTitle'),
+  configCopy: document.querySelector('#configCopy'),
+  backFromConfigButton: document.querySelector('#backFromConfigButton'),
+  roomSetupSection: document.querySelector('#roomSetupSection'),
+  settingsActionsSection: document.querySelector('#settingsActionsSection'),
+  returnHomeButton: document.querySelector('#returnHomeButton'),
   p1Score: document.querySelector('#p1Score'),
   p2Score: document.querySelector('#p2Score'),
   drawScore: document.querySelector('#drawScore'),
@@ -354,6 +375,8 @@ const roomSession = {
   pollTimer: 0,
   lastSnapshot: null,
 };
+let activeScreen = 'home';
+let configMode = 'settings';
 
 function loadSettings() {
   const parsed = readStoredJson(SETTINGS_KEY, {});
@@ -394,10 +417,8 @@ function loadMusicSettings() {
 }
 
 function sanitizeSettings(raw) {
-  const theme = THEMES[raw.theme] ? raw.theme : DEFAULT_SETTINGS.theme;
-  const backdropStyle = BACKDROP_STYLES.some((item) => item.value === raw.backdropStyle)
-    ? raw.backdropStyle
-    : DEFAULT_SETTINGS.backdropStyle;
+  const theme = 'originalArcade';
+  const backdropStyle = 'none';
   const gridStyle = GRID_STYLES.some((item) => item.value === raw.gridStyle) ? raw.gridStyle : DEFAULT_SETTINGS.gridStyle;
 
   return {
@@ -412,6 +433,70 @@ function sanitizeSettings(raw) {
     screenShake: raw.screenShake !== false,
     foodPulse: raw.foodPulse !== false,
   };
+}
+
+function showScreen(screenName) {
+  activeScreen = screenName;
+  elements.screens.forEach((screen) => {
+    screen.classList.toggle('is-active', screen.dataset.screen === screenName);
+  });
+}
+
+function setConfigMode(mode) {
+  configMode = mode;
+  const isRoomMode = mode === 'room';
+  elements.configKicker.textContent = isRoomMode ? 'Create Room' : 'Settings';
+  elements.configTitle.textContent = isRoomMode ? 'Build a room' : 'Tune the arena';
+  elements.configCopy.textContent = isRoomMode
+    ? 'Set the arena, choose who controls each seat, and launch the room. The room code appears in the top-right corner once created.'
+    : 'Adjust the board and presentation, then apply the settings to your local game.';
+  elements.roomSetupSection.classList.toggle('visually-hidden', !isRoomMode);
+  elements.settingsActionsSection.classList.toggle('visually-hidden', isRoomMode);
+}
+
+function showConfigScreen(mode) {
+  setConfigMode(mode);
+  showScreen('config');
+}
+
+function enterGameScreen() {
+  showScreen('game');
+}
+
+function returnToMenu() {
+  if (!roomSession.active && game.state === 'running') {
+    game.pause();
+  }
+  showScreen('home');
+}
+
+function resetLocalGame() {
+  if (roomSession.active) {
+    leaveRoomSession();
+  }
+  game.disableRemoteMode();
+  game.winner = null;
+  game.resetRound();
+  updateLocalTextBoard();
+}
+
+async function createConfiguredRoomSession(playerModes, agentTiming = 'turn-based') {
+  const payload = await createRoom(settings, {
+    playerModes,
+    agentTiming,
+  });
+  roomSession.token = payload.token;
+  roomSession.role = payload.role;
+  roomSession.agentTiming = payload.agentTiming ?? agentTiming;
+  roomSession.skillUrl = payload.skillUrl ?? '';
+  applyRoomSnapshot(payload.room);
+  startRoomPolling();
+  setApiLog([
+    payload.note || 'Room created.',
+    '',
+    describeAgentAccess(payload.agentAccess),
+  ].filter(Boolean).join('\n'));
+  return payload;
 }
 
 function saveSettings(settings) {
@@ -1566,7 +1651,8 @@ function updateLocalTextBoard() {
 }
 
 function updateRoomMeta() {
-  elements.roomStatus.textContent = roomSession.active ? `Room ${roomSession.roomCode}` : 'No active room';
+  elements.roomStatus.textContent = roomSession.active ? roomSession.roomCode : '';
+  elements.roomStatus.classList.toggle('is-visible', roomSession.active);
   const controllerSummary = roomSession.active
     ? `${roomSession.controllers.player1} vs ${roomSession.controllers.player2}`
     : 'local';
@@ -1610,6 +1696,10 @@ function updateAgentTimingToggle() {
   if (!enabled) {
     elements.realtimeAgentTiming.checked = false;
   }
+}
+
+function getAutomationTiming() {
+  return elements.automationRealtimeAgentTiming.checked ? 'realtime' : 'turn-based';
 }
 
 function describeAgentAccess(agentAccess) {
@@ -1796,6 +1886,9 @@ elements.form.addEventListener('input', (event) => {
   }
 
   const key = target.name;
+  if (!key) {
+    return;
+  }
   const value = target instanceof HTMLInputElement && target.type === 'checkbox' ? target.checked : target.value;
   setSetting(key, value);
 
@@ -1869,6 +1962,78 @@ elements.musicVolume.addEventListener('input', (event) => {
   updateMusicControls(music);
 });
 
+elements.homePlayButton.addEventListener('click', () => {
+  showScreen('play');
+});
+
+elements.homeAutomateButton.addEventListener('click', () => {
+  showScreen('automation');
+});
+
+elements.homeCreateRoomButton.addEventListener('click', () => {
+  showConfigScreen('room');
+});
+
+elements.homeSettingsButton.addEventListener('click', () => {
+  showConfigScreen('settings');
+});
+
+elements.backFromPlayButton.addEventListener('click', returnToMenu);
+elements.backFromAutomationButton.addEventListener('click', returnToMenu);
+elements.backFromConfigButton.addEventListener('click', returnToMenu);
+elements.returnHomeButton.addEventListener('click', returnToMenu);
+
+elements.playHumanButton.addEventListener('click', () => {
+  resetLocalGame();
+  enterGameScreen();
+  setStatus('Local human versus human ready.');
+  clearStatusAfterDelay();
+});
+
+elements.playBotButton.addEventListener('click', async () => {
+  try {
+    await createConfiguredRoomSession({ player1: 'human', player2: 'bot' }, 'turn-based');
+    enterGameScreen();
+    setStatus('Human versus bot room ready.');
+    clearStatusAfterDelay();
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : 'Unable to start human versus bot.');
+  }
+});
+
+elements.automationPlayVsAgentButton.addEventListener('click', async () => {
+  try {
+    await createConfiguredRoomSession({ player1: 'human', player2: 'agent' }, getAutomationTiming());
+    enterGameScreen();
+    setStatus('Play versus agent room ready.');
+    clearStatusAfterDelay();
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : 'Unable to start play versus agent.');
+  }
+});
+
+elements.automationAgentVsBotButton.addEventListener('click', async () => {
+  try {
+    await createConfiguredRoomSession({ player1: 'agent', player2: 'bot' }, getAutomationTiming());
+    enterGameScreen();
+    setStatus('Agent versus bot room ready.');
+    clearStatusAfterDelay();
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : 'Unable to start agent versus bot.');
+  }
+});
+
+elements.automationAgentVsAgentButton.addEventListener('click', async () => {
+  try {
+    await createConfiguredRoomSession({ player1: 'agent', player2: 'agent' }, getAutomationTiming());
+    enterGameScreen();
+    setStatus('Agent versus agent room ready.');
+    clearStatusAfterDelay();
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : 'Unable to start agent versus agent.');
+  }
+});
+
 elements.togglePlayButton.addEventListener('click', () => {
   handleTogglePlay();
 });
@@ -1882,26 +2047,13 @@ elements.restartButton.addEventListener('click', () => {
 elements.createRoomButton.addEventListener('click', async () => {
   try {
     const agentTiming = elements.realtimeAgentTiming.checked ? 'realtime' : 'turn-based';
-    const payload = await createRoom(settings, {
-      playerModes: {
-        player1: elements.player1Controller.value,
-        player2: elements.player2Controller.value,
-      },
-      agentTiming,
-    });
-    roomSession.token = payload.token;
-    roomSession.role = payload.role;
-    roomSession.agentTiming = payload.agentTiming ?? agentTiming;
-    roomSession.skillUrl = payload.skillUrl ?? '';
-    applyRoomSnapshot(payload.room);
-    startRoomPolling();
+    const payload = await createConfiguredRoomSession({
+      player1: elements.player1Controller.value,
+      player2: elements.player2Controller.value,
+    }, agentTiming);
+    enterGameScreen();
     setStatus(`Room ${payload.room.roomCode} created.`);
     clearStatusAfterDelay();
-    setApiLog([
-      payload.note || 'Room created.',
-      '',
-      describeAgentAccess(payload.agentAccess),
-    ].filter(Boolean).join('\n'));
   } catch (error) {
     setStatus(error instanceof Error ? error.message : 'Unable to create room.');
   }
@@ -1923,6 +2075,7 @@ elements.joinRoomButton.addEventListener('click', async () => {
     roomSession.role = payload.role;
     applyRoomSnapshot(payload.room);
     startRoomPolling();
+    enterGameScreen();
     setStatus(`Joined room ${payload.room.roomCode} as ${payload.role}.`);
     clearStatusAfterDelay();
   } catch (error) {
@@ -2082,6 +2235,8 @@ window.addEventListener('keydown', (event) => {
 
 updateRoomMeta();
 updateAgentTimingToggle();
+setConfigMode('settings');
+showScreen('home');
 updateLocalTextBoard();
 setApiLog('Type help to inspect the text-command schema.');
 window.setInterval(() => {
