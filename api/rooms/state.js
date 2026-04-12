@@ -15,7 +15,7 @@ export default async function handler(req, res) {
   }
 
   const roomCode = req.query?.roomCode;
-  const room = getRoomSnapshot(roomCode);
+  const room = await getRoomSnapshot(roomCode);
   if (!room) {
     sendJson(res, 404, { error: 'Room not found.' });
     return;

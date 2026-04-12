@@ -16,7 +16,7 @@ export default async function handler(req, res) {
 
   try {
     const body = await readJsonBody(req);
-    const joined = joinRoom(body.roomCode);
+    const joined = await joinRoom(body.roomCode);
     if (!joined) {
       sendJson(res, 404, { error: 'Room not found.' });
       return;

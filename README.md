@@ -16,6 +16,8 @@ This repository now contains two versions of DuelSnakes:
 - Text-command control surface with ASCII board rendering for agent-friendly interaction.
 - Stateless text/API endpoints for creating and stepping matches with machine-readable snapshots.
 - Room creation and join-by-code flow backed by Vercel API endpoints for browser-to-browser matches.
+- Durable free-tier room storage when `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are configured.
+- Room revision numbers, expiry timestamps, and recent room events for better debugging and agent orchestration.
 
 ## Development
 
@@ -43,6 +45,14 @@ The repository includes `vercel.json` for a static Vite deployment.
    - Build command: `npm run build`
    - Output directory: `dist`
 
+## Durable Rooms On Free Tier
+
+1. Create a free Upstash Redis database.
+2. In Vercel project settings, add `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`.
+3. Redeploy. Room APIs will automatically switch from in-memory mode to durable mode.
+
+If those env vars are missing, the app still works, but rooms are ephemeral and tied to the active serverless instance.
+
 ## API Endpoints
 
 - `GET /api/play/schema`
@@ -57,7 +67,9 @@ The repository includes `vercel.json` for a static Vite deployment.
 
 - Rooms are server-relayed and synchronized through the API.
 - Join codes are six characters.
-- The included room backend is in-memory. On Vercel this works as a baseline implementation, but durable multi-instance production play would require a shared store such as KV.
+- The API returns backend metadata, a room revision, expiry timestamp, and recent room events.
+- The included fallback backend is in-memory for local development and zero-config previews.
+- On free-tier Vercel, durable multi-instance room state is supported through Upstash Redis REST credentials.
 
 ## Controls
 

@@ -1374,7 +1374,8 @@ function updateLocalTextBoard() {
 function updateRoomMeta() {
   elements.roomStatus.textContent = roomSession.active ? `Room ${roomSession.roomCode}` : 'No active room';
   elements.roomRole.textContent = `Role: ${roomSession.role}`;
-  elements.roomBackend.textContent = `Backend: ${roomSession.backend}`;
+  const durability = roomSession.lastSnapshot?.durable ? 'durable' : roomSession.active ? 'ephemeral fallback' : 'browser-local';
+  elements.roomBackend.textContent = `Backend: ${roomSession.backend} • ${durability}`;
 }
 
 function stopRoomPolling() {
@@ -1689,7 +1690,12 @@ elements.refreshTextButton.addEventListener('click', () => {
 elements.apiDocsButton.addEventListener('click', async () => {
   try {
     const schema = await fetchApiSchema();
-    setApiLog([schema.name, '', ...schema.commands].join('\n'));
+    setApiLog([
+      schema.name,
+      `room storage: ${schema.roomStorage.durableBackend}`,
+      '',
+      ...schema.commands,
+    ].join('\n'));
   } catch (error) {
     setApiLog(error instanceof Error ? error.message : 'Unable to load API schema.');
   }

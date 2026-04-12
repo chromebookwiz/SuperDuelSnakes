@@ -19,6 +19,11 @@ export default async function handler(req, res) {
       roomState: 'GET /api/rooms/state?roomCode=XXXXXX',
       roomCommand: 'POST /api/rooms/command',
     },
+    roomStorage: {
+      durableBackend: process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN ? 'upstash-redis' : 'memory',
+      freeTierReady: true,
+      requiredEnvForDurability: ['UPSTASH_REDIS_REST_URL', 'UPSTASH_REDIS_REST_TOKEN'],
+    },
     commands: [
       'start',
       'pause',
@@ -37,7 +42,8 @@ export default async function handler(req, res) {
     notes: [
       'Text and API flows return a machine-readable match snapshot and an ASCII board representation.',
       'Room play is server-relayed via API polling. It is not true direct WebRTC peer-to-peer.',
-      'The default room backend in this repository is in-memory, so production persistence depends on runtime instance stability.',
+      'For durable free-tier deployment, set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN from a free Upstash Redis database.',
+      'Without those env vars, the app falls back to in-memory rooms for local development and zero-config previews.',
     ],
   });
 }

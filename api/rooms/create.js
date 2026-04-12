@@ -16,12 +16,14 @@ export default async function handler(req, res) {
 
   try {
     const body = await readJsonBody(req);
-    const created = createRoom(body.settings ?? {});
+    const created = await createRoom(body.settings ?? {});
     sendJson(res, 200, {
       room: serializeRoom(created.room),
       token: created.token,
       role: created.role,
-      note: 'Rooms are API-relayed. This is not direct WebRTC peer-to-peer.',
+      note: created.room.durable
+        ? 'Rooms are durable through Upstash Redis and API-relayed for free-tier Vercel compatibility.'
+        : 'Rooms are API-relayed. Configure Upstash Redis env vars to make them durable on free-tier Vercel.',
     });
   } catch (error) {
     sendJson(res, 400, { error: error instanceof Error ? error.message : 'Unable to create room.' });

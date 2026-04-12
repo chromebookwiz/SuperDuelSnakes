@@ -16,7 +16,7 @@ export default async function handler(req, res) {
 
   try {
     const body = await readJsonBody(req);
-    const result = applyRoomCommand({
+    const result = await applyRoomCommand({
       roomCode: body.roomCode,
       token: body.token,
       action: body.action,
