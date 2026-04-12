@@ -22,6 +22,7 @@ This repository now contains two versions of DuelSnakes:
 - Replay/history endpoint for recent room frames and event trails.
 - Explicit LLM training modes for human-vs-agent and LLM-vs-bot sessions.
 - A workspace skill file plus a hosted markdown playbook that an external agent can consume directly.
+- Configurable room creation where each seat can independently be `human`, `bot`, or `agent`.
 
 ## Development
 
@@ -76,9 +77,9 @@ If those env vars are missing, the app still works, but rooms are ephemeral and 
 
 ## LLM Training Modes
 
-- `opponent: "agent"`: the browser user or local client plays player 1, and an external API client controls player 2 with the returned `agentAccess` token.
-- `opponent: "bot"`: an external API client controls player 1, and the integrated bot plays player 2.
-- In both training modes, the game advances one tick per LLM response. The LLM should poll `/api/rooms/turn`, inspect the map info for the current tick, then answer with one direction or `stay`.
+- Default room creation remains `human` vs `human`.
+- Any seat combination is supported through `playerModes`, including human vs human, human vs bot, bot vs bot, human vs agent, agent vs agent, and mixed agent/bot/human rooms.
+- Rooms with one or more `agent` seats advance one tick per agent-response cycle. The waiting agent should poll `/api/rooms/turn`, inspect the map info for the current tick, then answer with one direction or `stay`.
 
 ## Room Model
 

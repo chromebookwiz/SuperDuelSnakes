@@ -9,19 +9,34 @@ Use this skill when an agent needs to play SuperDuelSnakes through API calls ins
 
 ## Modes
 
+Each room seat can independently be one of:
+
+- `human`
+- `bot`
+- `agent`
+
+The default mode is `human` vs `human`.
+
 ### Human vs Agent
 
-1. Create a room with `POST /api/rooms/create` and body `{ "settings": { ... }, "opponent": "agent" }`.
-2. The response includes `agentAccess` for `player2`.
+1. Create a room with `POST /api/rooms/create` and body `{ "settings": { ... }, "playerModes": { "player1": "human", "player2": "agent" } }`.
+2. The response includes `agentAccess.player2`.
 3. The browser user or another client can play as `player1`.
 4. The agent controls `player2` by calling `POST /api/rooms/command` with the returned token.
 
 ### LLM vs Bot
 
-1. Create a room with `POST /api/rooms/create` and body `{ "settings": { ... }, "opponent": "bot" }`.
-2. The response includes `agentAccess` for `player1`.
+1. Create a room with `POST /api/rooms/create` and body `{ "settings": { ... }, "playerModes": { "player1": "agent", "player2": "bot" } }`.
+2. The response includes `agentAccess.player1`.
 3. The built-in bot automatically plays `player2`.
 4. The agent controls `player1` through `POST /api/rooms/command`.
+
+### LLM vs LLM
+
+1. Create a room with `POST /api/rooms/create` and body `{ "settings": { ... }, "playerModes": { "player1": "agent", "player2": "agent" } }`.
+2. The response includes both `agentAccess.player1` and `agentAccess.player2`.
+3. Each API client polls `/api/rooms/turn` with its own token.
+4. A tick resolves after all pending agent seats respond.
 
 ## Core Endpoints
 
@@ -85,7 +100,7 @@ You may also send structured actions:
   - one direction for your player
   - `stay` if continuing straight is safest
 5. Submit exactly one response with `POST /api/rooms/command`.
-6. The room advances exactly one tick after that response.
+6. The room advances exactly one tick after all pending agent seats for that tick have responded.
 7. Repeat until `winner` is no longer `none`.
 
 ## Response Contract

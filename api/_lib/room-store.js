@@ -6,15 +6,18 @@ const MAX_REPLAY_HISTORY = 80;
 const LOCK_TTL_MS = 4000;
 const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL;
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+const PLAYER_KEYS = ['player1', 'player2'];
+const CONTROLLER_VALUES = ['human', 'bot', 'agent'];
 
 export async function createRoom(settings = {}, options = {}) {
   const backend = getBackend();
-  const opponentKind = normalizeOpponentKind(options.opponent);
+  const controllers = normalizeControllers(options);
 
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const roomCode = randomCode(6);
     const now = Date.now();
-    const player1Token = randomCode(24);
+    const seats = createSeats(controllers);
+    const owner = claimCreatorSeat(seats);
     const room = {
       roomCode,
       createdAt: now,
@@ -24,21 +27,15 @@ export async function createRoom(settings = {}, options = {}) {
       backend: backend.name,
       durable: backend.durable,
       revision: 1,
-      players: {
-        player1: player1Token,
-        player2: opponentKind === 'human' ? null : randomCode(24),
-      },
-      opponent: {
-        kind: opponentKind,
-        botPlayer: 'player2',
-        botDifficulty: 'adaptive',
-      },
-      turn: createTurnState(opponentKind, now),
-      events: [createEvent('room-created', { actor: 'system', opponent: opponentKind }, now)],
+      controllers,
+      seats,
+      turn: createTurnState(controllers, now),
+      events: [createEvent('room-created', { actor: 'system', controllers }, now)],
       history: [],
       match: createMatch(settings),
     };
 
+    initializeRoomState(room);
     recordReplayFrame(room, 'room-created', now);
 
     const created = await backend.createRoom(roomCode, room);
@@ -48,8 +45,8 @@ export async function createRoom(settings = {}, options = {}) {
 
     return {
       room,
-      token: player1Token,
-      role: 'player1',
+      token: owner.token,
+      role: owner.role,
     };
   }
 
@@ -64,16 +61,22 @@ export async function joinRoom(roomCode) {
 
     const synced = syncRoom(room);
     const now = Date.now();
+    const nextHumanSeat = PLAYER_KEYS.find((playerKey) => {
+      const seat = synced.seats[playerKey];
+      return seat.controller === 'human' && !seat.claimed;
+    });
 
-    if (synced.opponent?.kind === 'human' && !synced.players.player2) {
-      synced.players.player2 = randomCode(24);
+    if (nextHumanSeat) {
+      const token = randomCode(24);
+      synced.seats[nextHumanSeat].token = token;
+      synced.seats[nextHumanSeat].claimed = true;
       touchRoom(synced, now);
-      pushEvent(synced, createEvent('player-joined', { actor: 'player2' }, now));
+      pushEvent(synced, createEvent('player-joined', { actor: nextHumanSeat }, now));
       recordReplayFrame(synced, 'player-joined', now);
       return {
         room: synced,
-        token: synced.players.player2,
-        role: 'player2',
+        token,
+        role: nextHumanSeat,
       };
     }
 
@@ -82,7 +85,7 @@ export async function joinRoom(roomCode) {
     recordReplayFrame(synced, 'spectator-joined', now);
     return {
       room: synced,
-      token: randomCode(24),
+      token: null,
       role: 'spectator',
     };
   });
@@ -94,7 +97,7 @@ export async function getRoom(roomCode) {
 }
 
 export function syncRoom(room) {
-  if (room.turn?.mode === 'per-tick') {
+  if (room.turn.mode === 'per-tick') {
     return room;
   }
 
@@ -104,7 +107,7 @@ export function syncRoom(room) {
     const wasRunning = room.match.state === 'running';
     advanceByTime(room.match, delta, {
       onBeforeTick(currentMatch) {
-        planBotMove(room, currentMatch);
+        planAllBots(room, currentMatch);
       },
     });
     touchRoom(room, now, { bumpRevision: wasRunning });
@@ -132,10 +135,6 @@ export async function applyRoomCommand({ roomCode, token, action, commandText })
 
     syncRoom(room);
     const role = resolveRole(room, token);
-    if (!role) {
-      return { error: 'Invalid room token.' };
-    }
-
     const parsed = commandText ? parseTextCommand(commandText) : { actions: [action] };
     if (parsed.error) {
       return { error: parsed.error };
@@ -146,49 +145,44 @@ export async function applyRoomCommand({ roomCode, token, action, commandText })
       return { error: 'No valid actions were supplied.' };
     }
 
-    const isPerTick = room.turn?.mode === 'per-tick';
-    const waitingFor = room.turn?.waitingFor;
-
+    const mode = room.turn.mode;
     for (const nextAction of actions) {
+      const effectivePlayer = nextAction.player ?? role;
+      if (nextAction.type === 'direction' || nextAction.type === 'stay' || nextAction.type === 'noop') {
+        const authorizationError = authorizeSeatAction(room, role, effectivePlayer, nextAction.type, mode);
+        if (authorizationError) {
+          return { error: authorizationError };
+        }
+      } else if (nextAction.type === 'start' || nextAction.type === 'pause' || nextAction.type === 'reset' || nextAction.type === 'toggle') {
+        if (role === 'spectator' && !isBotOnlyRoom(room)) {
+          return { error: 'Spectators cannot control this room.' };
+        }
+      }
+
       if (nextAction.type === 'direction') {
-        const effectivePlayer = nextAction.player ?? role;
-        if (role === 'spectator') {
-          return { error: 'Spectators cannot control room players.' };
-        }
-        if (effectivePlayer !== role) {
-          return { error: `Token for ${role} cannot control ${effectivePlayer}.` };
-        }
         applyAction(room.match, { ...nextAction, player: effectivePlayer });
+        if (mode === 'per-tick' && room.controllers[effectivePlayer] === 'agent') {
+          room.turn.responses[effectivePlayer] = true;
+        }
       } else if (nextAction.type === 'stay' || nextAction.type === 'noop') {
-        const effectivePlayer = nextAction.player ?? role;
-        if (isPerTick && effectivePlayer !== waitingFor) {
-          return { error: `${effectivePlayer} cannot resolve a tick while waiting for ${waitingFor}.` };
+        if (mode === 'per-tick' && room.controllers[effectivePlayer] === 'agent') {
+          room.turn.responses[effectivePlayer] = true;
         }
       } else {
         applyAction(room.match, nextAction);
       }
     }
 
-    if (isPerTick) {
-      const resolvedByWaitingPlayer = actions.some((nextAction) => {
-        const effectivePlayer = nextAction.player ?? role;
-        return (nextAction.type === 'direction' || nextAction.type === 'stay' || nextAction.type === 'noop') && effectivePlayer === waitingFor;
-      });
-
-      if (resolvedByWaitingPlayer) {
+    if (mode === 'per-tick') {
+      if (canResolveTick(room)) {
         advanceOneTick(room.match, {
           onBeforeTick(currentMatch) {
-            if (room.opponent?.kind === 'bot') {
-              planBotMove(room, currentMatch);
-            }
+            planAllBots(room, currentMatch);
           },
         });
-        room.turn.tickNumber += 1;
-        room.turn.pendingSince = Date.now();
+        advanceTurn(room);
         recordReplayFrame(room, 'tick-response', room.turn.pendingSince);
       }
-    } else if (room.opponent?.kind === 'bot') {
-      planBotMove(room, room.match);
     }
 
     const now = Date.now();
@@ -215,7 +209,7 @@ export async function getRoomHistory(roomCode, limit = 40) {
     revision: room.revision,
     backend: room.backend,
     durable: Boolean(room.durable),
-    opponent: room.opponent,
+    controllers: room.controllers,
     events: Array.isArray(room.events) ? room.events.slice(-safeLimit) : [],
     history: Array.isArray(room.history) ? room.history.slice(-safeLimit) : [],
   };
@@ -229,19 +223,20 @@ export async function getRoomTurn(roomCode, token) {
 
   const role = resolveRole(room, token);
   const publicMatch = getPublicMatch(room.match);
-  const waitingFor = room.turn?.waitingFor ?? null;
+  const pendingPlayers = getPendingPlayers(room);
   return {
     roomCode: room.roomCode,
     revision: room.revision,
     backend: room.backend,
     durable: Boolean(room.durable),
     role,
+    controllers: room.controllers,
     turn: {
-      mode: room.turn?.mode ?? 'realtime',
-      tickNumber: room.turn?.tickNumber ?? 0,
-      waitingFor,
-      pendingSince: room.turn?.pendingSince ?? null,
-      readyForInput: Boolean(role && waitingFor && role === waitingFor),
+      mode: room.turn.mode,
+      tickNumber: room.turn.tickNumber,
+      pendingPlayers,
+      pendingSince: room.turn.pendingSince,
+      readyForInput: Boolean(role && pendingPlayers.includes(role) && !room.turn.responses[role]),
       allowStay: true,
     },
     observation: {
@@ -263,12 +258,17 @@ export function serializeRoom(room) {
     createdAt: room.createdAt,
     updatedAt: room.updatedAt,
     expiresAt: room.expiresAt,
+    controllers: room.controllers,
     players: {
-      player1Ready: Boolean(room.players.player1),
-      player2Ready: Boolean(room.players.player2),
+      player1Ready: isSeatActive(room.seats.player1),
+      player2Ready: isSeatActive(room.seats.player2),
     },
-    opponent: room.opponent,
-    turn: room.turn,
+    turn: {
+      mode: room.turn.mode,
+      tickNumber: room.turn.tickNumber,
+      pendingPlayers: getPendingPlayers(room),
+      pendingSince: room.turn.pendingSince,
+    },
     events: Array.isArray(room.events) ? room.events : [],
     match: publicMatch,
   };
@@ -292,6 +292,101 @@ function getBackend() {
     getRoom: getMemoryRoom,
     saveRoom: saveMemoryRoom,
   };
+}
+
+function createSeats(controllers) {
+  return Object.fromEntries(PLAYER_KEYS.map((playerKey) => {
+    const controller = controllers[playerKey];
+    if (controller === 'bot') {
+      return [playerKey, { controller, token: null, claimed: true }];
+    }
+    if (controller === 'agent') {
+      return [playerKey, { controller, token: randomCode(24), claimed: true }];
+    }
+    return [playerKey, { controller, token: null, claimed: false }];
+  }));
+}
+
+function claimCreatorSeat(seats) {
+  for (const playerKey of PLAYER_KEYS) {
+    const seat = seats[playerKey];
+    if (seat.controller === 'human' && !seat.claimed) {
+      seat.token = randomCode(24);
+      seat.claimed = true;
+      return { role: playerKey, token: seat.token };
+    }
+  }
+  return { role: 'spectator', token: null };
+}
+
+function initializeRoomState(room) {
+  if (room.turn.mode === 'per-tick' || isBotOnlyRoom(room)) {
+    applyAction(room.match, { type: 'start' });
+  }
+}
+
+function createTurnState(controllers, now) {
+  const pendingAgents = PLAYER_KEYS.filter((playerKey) => controllers[playerKey] === 'agent');
+  if (pendingAgents.length === 0) {
+    return {
+      mode: 'realtime',
+      tickNumber: 0,
+      pendingSince: null,
+      responses: {},
+    };
+  }
+  return {
+    mode: 'per-tick',
+    tickNumber: 0,
+    pendingSince: now,
+    responses: {},
+  };
+}
+
+function getPendingPlayers(room) {
+  if (room.turn.mode !== 'per-tick') {
+    return [];
+  }
+  return PLAYER_KEYS.filter((playerKey) => room.controllers[playerKey] === 'agent');
+}
+
+function authorizeSeatAction(room, role, effectivePlayer, actionType, mode) {
+  if (!effectivePlayer || !PLAYER_KEYS.includes(effectivePlayer)) {
+    return 'A valid player must be supplied.';
+  }
+
+  const controller = room.controllers[effectivePlayer];
+  if (controller === 'bot') {
+    return `${effectivePlayer} is bot-controlled.`;
+  }
+  if (role !== effectivePlayer) {
+    return `Token for ${role ?? 'spectator'} cannot control ${effectivePlayer}.`;
+  }
+  if (mode === 'per-tick' && controller === 'agent' && room.turn.responses[effectivePlayer]) {
+    return `${effectivePlayer} has already responded for this tick.`;
+  }
+  if (mode === 'per-tick' && controller !== 'agent' && actionType !== 'direction') {
+    return `${effectivePlayer} must provide a direction update through local controls.`;
+  }
+  return null;
+}
+
+function canResolveTick(room) {
+  return getPendingPlayers(room).every((playerKey) => room.turn.responses[playerKey]);
+}
+
+function advanceTurn(room) {
+  room.turn.tickNumber += 1;
+  room.turn.pendingSince = Date.now();
+  room.turn.responses = {};
+}
+
+function isBotOnlyRoom(room) {
+  return PLAYER_KEYS.every((playerKey) => room.controllers[playerKey] === 'bot');
+}
+
+function isSeatActive(seat) {
+  return seat.controller === 'bot' || seat.claimed;
 }
 
 function getMemoryStore() {
@@ -371,11 +466,9 @@ async function persistMutationResult(backend, result) {
     await backend.saveRoom(result.room);
     return result;
   }
-
   if (result && result.roomCode) {
     await backend.saveRoom(result);
   }
-
   return result;
 }
 
@@ -395,7 +488,6 @@ async function withRedisLock(roomCode, callback) {
         }
       }
     }
-
     await delay(40 + attempt * 20);
   }
 
@@ -424,30 +516,26 @@ function getRedisKey(roomCode) {
 }
 
 function resolveRole(room, token) {
-  if (token && token === room.players.player1) {
-    return 'player1';
+  if (!token) {
+    return 'spectator';
   }
-  if (token && token === room.players.player2) {
-    return 'player2';
-  }
-  return null;
+  return PLAYER_KEYS.find((playerKey) => room.seats[playerKey].token === token) ?? 'spectator';
 }
 
-function planBotMove(room, match) {
-  if (room.opponent?.kind !== 'bot') {
-    return;
+function planAllBots(room, match) {
+  for (const playerKey of PLAYER_KEYS) {
+    if (room.controllers[playerKey] !== 'bot') {
+      continue;
+    }
+    if (match.state === 'gameover') {
+      continue;
+    }
+    const direction = chooseBotDirection(match, playerKey);
+    if (!direction) {
+      continue;
+    }
+    applyAction(match, { type: 'direction', player: playerKey, direction });
   }
-  if (match.state === 'gameover') {
-    return;
-  }
-
-  const playerKey = room.opponent.botPlayer ?? 'player2';
-  const direction = chooseBotDirection(match, playerKey);
-  if (!direction) {
-    return;
-  }
-
-  applyAction(match, { type: 'direction', player: playerKey, direction });
 }
 
 function touchRoom(room, now, { bumpRevision = true } = {}) {
@@ -503,8 +591,25 @@ function normalizeRoomCode(roomCode) {
   return String(roomCode || '').trim().toUpperCase();
 }
 
-function normalizeOpponentKind(opponent) {
-  return opponent === 'bot' || opponent === 'agent' ? opponent : 'human';
+function normalizeControllers(options) {
+  if (options.playerModes && typeof options.playerModes === 'object') {
+    return {
+      player1: normalizeController(options.playerModes.player1),
+      player2: normalizeController(options.playerModes.player2),
+    };
+  }
+
+  if (options.opponent === 'agent') {
+    return { player1: 'human', player2: 'agent' };
+  }
+  if (options.opponent === 'bot') {
+    return { player1: 'agent', player2: 'bot' };
+  }
+  return { player1: 'human', player2: 'human' };
+}
+
+function normalizeController(value) {
+  return CONTROLLER_VALUES.includes(value) ? value : 'human';
 }
 
 function clampHistoryLimit(limit) {
@@ -524,29 +629,4 @@ function randomCode(length) {
     result += alphabet[Math.floor(Math.random() * alphabet.length)];
   }
   return result;
-}
-
-function createTurnState(opponentKind, now) {
-  if (opponentKind === 'agent') {
-    return {
-      mode: 'per-tick',
-      waitingFor: 'player2',
-      tickNumber: 0,
-      pendingSince: now,
-    };
-  }
-  if (opponentKind === 'bot') {
-    return {
-      mode: 'per-tick',
-      waitingFor: 'player1',
-      tickNumber: 0,
-      pendingSince: now,
-    };
-  }
-  return {
-    mode: 'realtime',
-    waitingFor: null,
-    tickNumber: 0,
-    pendingSince: null,
-  };
 }

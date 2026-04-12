@@ -46,22 +46,32 @@ export default async function handler(req, res) {
       'help',
     ],
     roomOptions: {
-      opponent: ['human', 'bot', 'agent'],
+      playerModes: {
+        player1: ['human', 'bot', 'agent'],
+        player2: ['human', 'bot', 'agent'],
+      },
+      defaults: {
+        player1: 'human',
+        player2: 'human',
+      },
     },
     skillUrl: '/skills/superduelsnakes-llm-playbook.md',
     trainingModes: {
-      humanVsAgent: 'Create a room with opponent=agent. The browser user plays player1 and an external API client controls player2.',
-      llmVsBot: 'Create a room with opponent=bot. An external API client controls player1 against the integrated player2 bot.',
+      humanVsAgent: 'Create a room with playerModes { player1: human, player2: agent }.',
+      llmVsBot: 'Create a room with playerModes { player1: agent, player2: bot }.',
+      llmVsLlm: 'Create a room with playerModes { player1: agent, player2: agent }.',
+      botVsBot: 'Create a room with playerModes { player1: bot, player2: bot }.',
+      humanVsBot: 'Create a room with playerModes { player1: human, player2: bot } or { player1: bot, player2: human }.',
     },
     notes: [
       'Text and API flows return a machine-readable match snapshot and an ASCII board representation.',
       'Room play is server-relayed via API polling. It is not true direct WebRTC peer-to-peer.',
       'For durable free-tier deployment, set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN from a free Upstash Redis database.',
       'Without those env vars, the app falls back to in-memory rooms for local development and zero-config previews.',
-      'Bot rooms reserve player 2 for an API-driven opponent that chooses safe food-seeking turns.',
+      'Each seat can independently be human, bot, or agent; the default room mode remains human vs human.',
       'Replay history is available from GET /api/rooms/history and includes recent room frames with ASCII board snapshots.',
-      'Agent rooms reserve player 2 for an external API caller and return an agentAccess payload with token, room code, and skill URL.',
-      'Agent and bot training rooms use per-tick pacing: fetch /api/rooms/turn, choose a direction or stay, submit one response, and the game advances exactly one tick.',
+      'Rooms with one or more agent seats return an agentAccess map containing the token for each API-controlled seat.',
+      'Rooms with one or more agent seats use per-tick pacing: fetch /api/rooms/turn, choose a direction or stay, submit one response per pending agent seat, and the game advances exactly one tick.',
     ],
   });
 }

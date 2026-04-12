@@ -212,11 +212,25 @@ app.innerHTML = `
 
           <section class="settings-group">
             <h3>Network Rooms</h3>
-            <p>Create a hosted room, share the code, and play against a second browser through API-synced state.</p>
+            <p>Create a hosted room with any human, bot, or API-controlled seat combination. Human versus human stays the default.</p>
             <div class="room-grid">
-              <button class="button button-primary" id="createRoomButton" type="button">Create Room</button>
-              <button class="button button-secondary" id="createAgentRoomButton" type="button">Create Agent Room</button>
-              <button class="button button-secondary" id="createBotRoomButton" type="button">Create LLM v Bot</button>
+              <div class="control-row">
+                <label for="player1Controller">Player 1 Controller</label>
+                <select id="player1Controller">
+                  <option value="human" selected>Human</option>
+                  <option value="bot">Bot</option>
+                  <option value="agent">LLM / API</option>
+                </select>
+              </div>
+              <div class="control-row">
+                <label for="player2Controller">Player 2 Controller</label>
+                <select id="player2Controller">
+                  <option value="human" selected>Human</option>
+                  <option value="bot">Bot</option>
+                  <option value="agent">LLM / API</option>
+                </select>
+              </div>
+              <button class="button button-primary" id="createRoomButton" type="button">Create Configured Room</button>
               <div class="room-join-row">
                 <input class="text-input" id="roomCodeInput" type="text" maxlength="6" placeholder="ROOM CODE" />
                 <button class="button button-secondary" id="joinRoomButton" type="button">Join</button>
@@ -290,8 +304,8 @@ const elements = {
   statusNote: document.querySelector('#statusNote'),
   touchButtons: document.querySelectorAll('.touch-button'),
   createRoomButton: document.querySelector('#createRoomButton'),
-  createAgentRoomButton: document.querySelector('#createAgentRoomButton'),
-  createBotRoomButton: document.querySelector('#createBotRoomButton'),
+  player1Controller: document.querySelector('#player1Controller'),
+  player2Controller: document.querySelector('#player2Controller'),
   roomCodeInput: document.querySelector('#roomCodeInput'),
   joinRoomButton: document.querySelector('#joinRoomButton'),
   leaveRoomButton: document.querySelector('#leaveRoomButton'),
@@ -315,7 +329,7 @@ const roomSession = {
   token: '',
   role: 'local',
   backend: 'browser-local',
-  opponent: 'local',
+  controllers: { player1: 'human', player2: 'human' },
   skillUrl: '',
   pollTimer: 0,
   lastSnapshot: null,
@@ -1381,7 +1395,10 @@ function updateLocalTextBoard() {
 
 function updateRoomMeta() {
   elements.roomStatus.textContent = roomSession.active ? `Room ${roomSession.roomCode}` : 'No active room';
-  elements.roomRole.textContent = `Role: ${roomSession.role} • Opponent: ${roomSession.opponent}`;
+  const controllerSummary = roomSession.active
+    ? `${roomSession.controllers.player1} vs ${roomSession.controllers.player2}`
+    : 'local';
+  elements.roomRole.textContent = `Role: ${roomSession.role} • Mode: ${controllerSummary}`;
   const durability = roomSession.lastSnapshot?.durable ? 'durable' : roomSession.active ? 'ephemeral fallback' : 'browser-local';
   elements.roomBackend.textContent = `Backend: ${roomSession.backend} • ${durability}`;
 }
@@ -1398,7 +1415,7 @@ function applyRoomSnapshot(room) {
   roomSession.active = true;
   roomSession.roomCode = room.roomCode;
   roomSession.backend = room.backend;
-  roomSession.opponent = room.opponent?.kind ?? 'human';
+  roomSession.controllers = room.controllers ?? { player1: 'human', player2: 'human' };
   game.applyRemoteSnapshot(room.match);
   renderTextBoard(room.match.boardText);
   updateRoomMeta();
@@ -1409,13 +1426,13 @@ function describeAgentAccess(agentAccess) {
     return '';
   }
 
-  return [
-    `mode: ${agentAccess.mode}`,
-    `room: ${agentAccess.roomCode}`,
-    `player: ${agentAccess.player}`,
-    `token: ${agentAccess.token}`,
-    `skill: ${agentAccess.skillUrl}`,
-  ].join('\n');
+  return Object.values(agentAccess)
+    .map((entry) => [
+      `player: ${entry.player}`,
+      `token: ${entry.token}`,
+      `skill: ${entry.skillUrl}`,
+    ].join('\n'))
+    .join('\n\n');
 }
 
 async function syncRoomFromApi() {
@@ -1445,7 +1462,7 @@ function leaveRoomSession() {
   roomSession.token = '';
   roomSession.role = 'local';
   roomSession.backend = 'browser-local';
-  roomSession.opponent = 'local';
+  roomSession.controllers = { player1: 'human', player2: 'human' };
   roomSession.skillUrl = '';
   roomSession.lastSnapshot = null;
   game.disableRemoteMode();
@@ -1652,56 +1669,26 @@ elements.restartButton.addEventListener('click', () => {
 
 elements.createRoomButton.addEventListener('click', async () => {
   try {
-    const payload = await createRoom(settings);
+    const payload = await createRoom(settings, {
+      playerModes: {
+        player1: elements.player1Controller.value,
+        player2: elements.player2Controller.value,
+      },
+    });
     roomSession.token = payload.token;
     roomSession.role = payload.role;
+    roomSession.skillUrl = payload.skillUrl ?? '';
     applyRoomSnapshot(payload.room);
     startRoomPolling();
     setStatus(`Room ${payload.room.roomCode} created.`);
     clearStatusAfterDelay();
-    setApiLog(payload.note || 'Room created.');
+    setApiLog([
+      payload.note || 'Room created.',
+      '',
+      describeAgentAccess(payload.agentAccess),
+    ].filter(Boolean).join('\n'));
   } catch (error) {
     setStatus(error instanceof Error ? error.message : 'Unable to create room.');
-  }
-});
-
-elements.createAgentRoomButton.addEventListener('click', async () => {
-  try {
-    const payload = await createRoom(settings, { opponent: 'agent' });
-    roomSession.token = payload.token;
-    roomSession.role = payload.role;
-    roomSession.skillUrl = payload.skillUrl ?? '';
-    applyRoomSnapshot(payload.room);
-    startRoomPolling();
-    setStatus(`Agent room ${payload.room.roomCode} created.`);
-    clearStatusAfterDelay();
-    setApiLog([
-      payload.note || 'Agent room created.',
-      '',
-      describeAgentAccess(payload.agentAccess),
-    ].filter(Boolean).join('\n'));
-  } catch (error) {
-    setStatus(error instanceof Error ? error.message : 'Unable to create agent room.');
-  }
-});
-
-elements.createBotRoomButton.addEventListener('click', async () => {
-  try {
-    const payload = await createRoom(settings, { opponent: 'bot' });
-    roomSession.token = payload.token;
-    roomSession.role = payload.role;
-    roomSession.skillUrl = payload.skillUrl ?? '';
-    applyRoomSnapshot(payload.room);
-    startRoomPolling();
-    setStatus(`LLM v Bot room ${payload.room.roomCode} created.`);
-    clearStatusAfterDelay();
-    setApiLog([
-      payload.note || 'Bot room created.',
-      '',
-      describeAgentAccess(payload.agentAccess),
-    ].filter(Boolean).join('\n'));
-  } catch (error) {
-    setStatus(error instanceof Error ? error.message : 'Unable to create bot room.');
   }
 });
 
@@ -1783,6 +1770,9 @@ elements.apiDocsButton.addEventListener('click', async () => {
       'modes:',
       `- human-vs-agent: ${schema.trainingModes.humanVsAgent}`,
       `- llm-vs-bot: ${schema.trainingModes.llmVsBot}`,
+      `- llm-vs-llm: ${schema.trainingModes.llmVsLlm}`,
+      `- bot-vs-bot: ${schema.trainingModes.botVsBot}`,
+      `- human-vs-bot: ${schema.trainingModes.humanVsBot}`,
       '',
       ...schema.commands,
     ].join('\n'));

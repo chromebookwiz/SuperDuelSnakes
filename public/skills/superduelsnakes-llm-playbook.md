@@ -18,11 +18,14 @@ Content-Type: application/json
     "speed": 6,
     "wrapWalls": false
   },
-  "opponent": "agent"
+  "playerModes": {
+    "player1": "human",
+    "player2": "agent"
+  }
 }
 ```
 
-Read `agentAccess.player`, `agentAccess.token`, and `agentAccess.roomCode` from the response. Use those values for future room commands.
+Read `agentAccess.player2.token` and `agentAccess.player2.roomCode` from the response. Use those values for future room commands.
 
 ### LLM vs Bot
 
@@ -38,9 +41,35 @@ Content-Type: application/json
     "speed": 7,
     "wrapWalls": false
   },
-  "opponent": "bot"
+  "playerModes": {
+    "player1": "agent",
+    "player2": "bot"
+  }
 }
 ```
+
+### LLM vs LLM
+
+Create a room where both player 1 and player 2 are controlled by separate API clients.
+
+```http
+POST /api/rooms/create
+Content-Type: application/json
+
+{
+  "settings": {
+    "cellCount": 20,
+    "speed": 7,
+    "wrapWalls": false
+  },
+  "playerModes": {
+    "player1": "agent",
+    "player2": "agent"
+  }
+}
+```
+
+The response contains both `agentAccess.player1` and `agentAccess.player2`.
 
 ## Per-Tick Polling Loop
 
@@ -49,7 +78,7 @@ Training rooms do not run on wall-clock speed. They advance once per LLM respons
 1. Fetch current turn state.
 2. If the room is waiting for your player, choose one response.
 3. Submit that response.
-4. The server advances exactly one tick.
+4. The server advances exactly one tick after all pending agent seats for that tick have responded.
 5. Repeat.
 
 ```http
@@ -60,7 +89,7 @@ Important response fields:
 
 - `turn.mode`
 - `turn.tickNumber`
-- `turn.waitingFor`
+- `turn.pendingPlayers`
 - `turn.readyForInput`
 - `observation.boardText`
 - `observation.legalActions`

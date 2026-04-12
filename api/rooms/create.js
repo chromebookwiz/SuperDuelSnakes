@@ -19,34 +19,31 @@ export default async function handler(req, res) {
     const skillUrl = '/skills/superduelsnakes-llm-playbook.md';
     const created = await createRoom(body.settings ?? {}, {
       opponent: body.opponent,
+      playerModes: body.playerModes,
     });
-    const agentAccess = created.room.opponent.kind === 'agent'
-      ? {
-          mode: 'human-vs-agent',
-          player: 'player2',
+    const agentAccess = Object.fromEntries(
+      Object.entries(created.room.controllers)
+        .filter(([, controller]) => controller === 'agent')
+        .map(([player, controller]) => [player, {
+          player,
+          controller,
           roomCode: created.room.roomCode,
-          token: created.room.players.player2,
+          token: created.room.seats[player].token,
           skillUrl,
-        }
-      : created.room.opponent.kind === 'bot'
-        ? {
-            mode: 'llm-vs-bot',
-            player: 'player1',
-            roomCode: created.room.roomCode,
-            token: created.token,
-            skillUrl,
-          }
-        : null;
+        }]),
+    );
+
+    const modeLabel = `${created.room.controllers.player1} vs ${created.room.controllers.player2}`;
 
     sendJson(res, 200, {
       room: serializeRoom(created.room),
       token: created.token,
       role: created.role,
       skillUrl,
-      agentAccess,
+      agentAccess: Object.keys(agentAccess).length > 0 ? agentAccess : null,
       note: created.room.durable
-        ? `Room created with ${created.room.opponent.kind} opponent mode and durable Upstash-backed storage.`
-        : `Room created with ${created.room.opponent.kind} opponent mode. Configure Upstash Redis env vars to make it durable on free-tier Vercel.`,
+        ? `Room created in ${modeLabel} mode with durable Upstash-backed storage.`
+        : `Room created in ${modeLabel} mode. Configure Upstash Redis env vars to make it durable on free-tier Vercel.`,
     });
   } catch (error) {
     sendJson(res, 400, { error: error instanceof Error ? error.message : 'Unable to create room.' });
