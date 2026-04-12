@@ -42,25 +42,32 @@ Content-Type: application/json
 }
 ```
 
-## Polling Loop
+## Per-Tick Polling Loop
 
-1. Fetch current room state.
-2. Parse the ASCII board and legal actions.
-3. Choose a single action.
-4. Submit it.
-5. Repeat until a winner exists.
+Training rooms do not run on wall-clock speed. They advance once per LLM response.
+
+1. Fetch current turn state.
+2. If the room is waiting for your player, choose one response.
+3. Submit that response.
+4. The server advances exactly one tick.
+5. Repeat.
 
 ```http
-GET /api/rooms/state?roomCode=ABC123
+GET /api/rooms/turn?roomCode=ABC123&token=ROOM_TOKEN
 ```
 
 Important response fields:
 
-- `room.match.boardText`
-- `room.match.legalActions`
-- `room.match.summary`
-- `room.events`
-- `room.revision`
+- `turn.mode`
+- `turn.tickNumber`
+- `turn.waitingFor`
+- `turn.readyForInput`
+- `observation.boardText`
+- `observation.legalActions`
+- `observation.summary`
+- `observation.events`
+
+If `turn.readyForInput` is false, wait briefly and poll again.
 
 ## Sending Moves
 
@@ -72,6 +79,19 @@ Content-Type: application/json
   "roomCode": "ABC123",
   "token": "ROOM_TOKEN",
   "commandText": "p1 right"
+}
+```
+
+To continue straight without changing direction, send:
+
+```http
+POST /api/rooms/command
+Content-Type: application/json
+
+{
+  "roomCode": "ABC123",
+  "token": "ROOM_TOKEN",
+  "commandText": "p1 stay"
 }
 ```
 
@@ -122,4 +142,4 @@ Use history to analyze:
 - Prefer safe moves first.
 - Among safe moves, prefer shorter routes to food.
 - Avoid entering cells that can be occupied by the opponent on the next tick.
-- In bot mode, act quickly because player 2 continues to plan automatically.
+- In training modes, each response resolves one tick, so latency affects throughput rather than causing missed frames.

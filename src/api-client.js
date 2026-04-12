@@ -35,6 +35,10 @@ export function fetchRoomState(roomCode) {
   return requestJson(`/api/rooms/state?roomCode=${encodeURIComponent(roomCode)}`);
 }
 
+export function fetchRoomTurn(roomCode, token) {
+  return requestJson(`/api/rooms/turn?roomCode=${encodeURIComponent(roomCode)}&token=${encodeURIComponent(token)}`);
+}
+
 export function fetchRoomHistory(roomCode, limit = 40) {
   return requestJson(`/api/rooms/history?roomCode=${encodeURIComponent(roomCode)}&limit=${encodeURIComponent(limit)}`);
 }

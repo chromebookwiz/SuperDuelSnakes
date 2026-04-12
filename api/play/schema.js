@@ -17,6 +17,7 @@ export default async function handler(req, res) {
       createRoom: 'POST /api/rooms/create',
       joinRoom: 'POST /api/rooms/join',
       roomState: 'GET /api/rooms/state?roomCode=XXXXXX',
+      roomTurn: 'GET /api/rooms/turn?roomCode=XXXXXX&token=ROOM_TOKEN',
       roomCommand: 'POST /api/rooms/command',
       roomHistory: 'GET /api/rooms/history?roomCode=XXXXXX&limit=40',
     },
@@ -39,6 +40,9 @@ export default async function handler(req, res) {
       'p2 left',
       'p2 right',
       'tick 250',
+      'stay',
+      'p1 stay',
+      'p2 stay',
       'help',
     ],
     roomOptions: {
@@ -57,6 +61,7 @@ export default async function handler(req, res) {
       'Bot rooms reserve player 2 for an API-driven opponent that chooses safe food-seeking turns.',
       'Replay history is available from GET /api/rooms/history and includes recent room frames with ASCII board snapshots.',
       'Agent rooms reserve player 2 for an external API caller and return an agentAccess payload with token, room code, and skill URL.',
+      'Agent and bot training rooms use per-tick pacing: fetch /api/rooms/turn, choose a direction or stay, submit one response, and the game advances exactly one tick.',
     ],
   });
 }

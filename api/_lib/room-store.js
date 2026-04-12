@@ -1,4 +1,4 @@
-import { advanceByTime, applyAction, chooseBotDirection, createMatch, getPublicMatch, parseTextCommand } from '../../src/shared/game-engine.js';
+import { advanceByTime, advanceOneTick, applyAction, chooseBotDirection, createMatch, getPublicMatch, parseTextCommand } from '../../src/shared/game-engine.js';
 
 const ROOM_TTL_MS = 1000 * 60 * 60 * 6;
 const MAX_EVENT_HISTORY = 16;
@@ -33,6 +33,7 @@ export async function createRoom(settings = {}, options = {}) {
         botPlayer: 'player2',
         botDifficulty: 'adaptive',
       },
+      turn: createTurnState(opponentKind, now),
       events: [createEvent('room-created', { actor: 'system', opponent: opponentKind }, now)],
       history: [],
       match: createMatch(settings),
@@ -93,6 +94,10 @@ export async function getRoom(roomCode) {
 }
 
 export function syncRoom(room) {
+  if (room.turn?.mode === 'per-tick') {
+    return room;
+  }
+
   const now = Date.now();
   const delta = now - room.lastAdvancedAt;
   if (delta > 0) {
@@ -141,6 +146,9 @@ export async function applyRoomCommand({ roomCode, token, action, commandText })
       return { error: 'No valid actions were supplied.' };
     }
 
+    const isPerTick = room.turn?.mode === 'per-tick';
+    const waitingFor = room.turn?.waitingFor;
+
     for (const nextAction of actions) {
       if (nextAction.type === 'direction') {
         const effectivePlayer = nextAction.player ?? role;
@@ -151,12 +159,35 @@ export async function applyRoomCommand({ roomCode, token, action, commandText })
           return { error: `Token for ${role} cannot control ${effectivePlayer}.` };
         }
         applyAction(room.match, { ...nextAction, player: effectivePlayer });
+      } else if (nextAction.type === 'stay' || nextAction.type === 'noop') {
+        const effectivePlayer = nextAction.player ?? role;
+        if (isPerTick && effectivePlayer !== waitingFor) {
+          return { error: `${effectivePlayer} cannot resolve a tick while waiting for ${waitingFor}.` };
+        }
       } else {
         applyAction(room.match, nextAction);
       }
     }
 
-    if (room.opponent?.kind === 'bot') {
+    if (isPerTick) {
+      const resolvedByWaitingPlayer = actions.some((nextAction) => {
+        const effectivePlayer = nextAction.player ?? role;
+        return (nextAction.type === 'direction' || nextAction.type === 'stay' || nextAction.type === 'noop') && effectivePlayer === waitingFor;
+      });
+
+      if (resolvedByWaitingPlayer) {
+        advanceOneTick(room.match, {
+          onBeforeTick(currentMatch) {
+            if (room.opponent?.kind === 'bot') {
+              planBotMove(room, currentMatch);
+            }
+          },
+        });
+        room.turn.tickNumber += 1;
+        room.turn.pendingSince = Date.now();
+        recordReplayFrame(room, 'tick-response', room.turn.pendingSince);
+      }
+    } else if (room.opponent?.kind === 'bot') {
       planBotMove(room, room.match);
     }
 
@@ -190,6 +221,38 @@ export async function getRoomHistory(roomCode, limit = 40) {
   };
 }
 
+export async function getRoomTurn(roomCode, token) {
+  const room = await getRoomSnapshot(roomCode);
+  if (!room) {
+    return null;
+  }
+
+  const role = resolveRole(room, token);
+  const publicMatch = getPublicMatch(room.match);
+  const waitingFor = room.turn?.waitingFor ?? null;
+  return {
+    roomCode: room.roomCode,
+    revision: room.revision,
+    backend: room.backend,
+    durable: Boolean(room.durable),
+    role,
+    turn: {
+      mode: room.turn?.mode ?? 'realtime',
+      tickNumber: room.turn?.tickNumber ?? 0,
+      waitingFor,
+      pendingSince: room.turn?.pendingSince ?? null,
+      readyForInput: Boolean(role && waitingFor && role === waitingFor),
+      allowStay: true,
+    },
+    observation: {
+      boardText: publicMatch.boardText,
+      legalActions: publicMatch.legalActions,
+      summary: publicMatch.summary,
+      events: Array.isArray(room.events) ? room.events.slice(-6) : [],
+    },
+  };
+}
+
 export function serializeRoom(room) {
   const publicMatch = getPublicMatch(room.match);
   return {
@@ -205,6 +268,7 @@ export function serializeRoom(room) {
       player2Ready: Boolean(room.players.player2),
     },
     opponent: room.opponent,
+    turn: room.turn,
     events: Array.isArray(room.events) ? room.events : [],
     match: publicMatch,
   };
@@ -460,4 +524,29 @@ function randomCode(length) {
     result += alphabet[Math.floor(Math.random() * alphabet.length)];
   }
   return result;
+}
+
+function createTurnState(opponentKind, now) {
+  if (opponentKind === 'agent') {
+    return {
+      mode: 'per-tick',
+      waitingFor: 'player2',
+      tickNumber: 0,
+      pendingSince: now,
+    };
+  }
+  if (opponentKind === 'bot') {
+    return {
+      mode: 'per-tick',
+      waitingFor: 'player1',
+      tickNumber: 0,
+      pendingSince: now,
+    };
+  }
+  return {
+    mode: 'realtime',
+    waitingFor: null,
+    tickNumber: 0,
+    pendingSince: null,
+  };
 }

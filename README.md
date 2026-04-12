@@ -65,6 +65,7 @@ If those env vars are missing, the app still works, but rooms are ephemeral and 
 - `POST /api/rooms/create`
 - `POST /api/rooms/join`
 - `GET /api/rooms/state?roomCode=XXXXXX`
+- `GET /api/rooms/turn?roomCode=XXXXXX&token=ROOM_TOKEN`
 - `GET /api/rooms/history?roomCode=XXXXXX&limit=40`
 - `POST /api/rooms/command`
 
@@ -77,6 +78,7 @@ If those env vars are missing, the app still works, but rooms are ephemeral and 
 
 - `opponent: "agent"`: the browser user or local client plays player 1, and an external API client controls player 2 with the returned `agentAccess` token.
 - `opponent: "bot"`: an external API client controls player 1, and the integrated bot plays player 2.
+- In both training modes, the game advances one tick per LLM response. The LLM should poll `/api/rooms/turn`, inspect the map info for the current tick, then answer with one direction or `stay`.
 
 ## Room Model
 

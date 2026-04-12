@@ -27,6 +27,7 @@ Use this skill when an agent needs to play SuperDuelSnakes through API calls ins
 
 - `GET /api/play/schema`
 - `POST /api/rooms/create`
+- `GET /api/rooms/turn?roomCode=XXXXXX&token=ROOM_TOKEN`
 - `GET /api/rooms/state?roomCode=XXXXXX`
 - `GET /api/rooms/history?roomCode=XXXXXX&limit=40`
 - `POST /api/rooms/command`
@@ -62,23 +63,42 @@ You may also send structured actions:
 - `start`
 - `pause`
 - `reset`
+- `stay`
 - `p1 up`
 - `p1 down`
 - `p1 left`
 - `p1 right`
+- `p1 stay`
 - `p2 up`
 - `p2 down`
 - `p2 left`
 - `p2 right`
+- `p2 stay`
 - `tick 250`
 
-## Recommended Agent Loop
+## Per-Tick Loop
 
-1. Fetch room state.
-2. Parse `match.boardText`, `match.legalActions`, `match.summary`, and `events`.
-3. Choose one legal direction for your assigned player.
-4. Submit exactly one action.
-5. Repeat until `winner` is no longer `none`.
+1. Fetch `GET /api/rooms/turn?roomCode=...&token=...`.
+2. If `turn.readyForInput` is `false`, wait briefly and poll again.
+3. Parse `observation.boardText`, `observation.legalActions`, `observation.summary`, and `observation.events`.
+4. Choose one response for the current tick:
+  - one direction for your player
+  - `stay` if continuing straight is safest
+5. Submit exactly one response with `POST /api/rooms/command`.
+6. The room advances exactly one tick after that response.
+7. Repeat until `winner` is no longer `none`.
+
+## Response Contract
+
+Respond with exactly one instruction per tick:
+
+- `up`
+- `down`
+- `left`
+- `right`
+- `stay`
+
+When sending text commands over the API, include the explicit player prefix if useful, for example `p2 left` or `p1 stay`.
 
 ## Decision Heuristics
 
@@ -86,7 +106,7 @@ You may also send structured actions:
 - Avoid cells occupied by either snake body.
 - Prefer moves that reduce Manhattan distance to food when safe.
 - Use `history` to inspect recent failures and collision patterns.
-- In `llm-vs-bot` mode, expect `player2` to keep advancing even if you wait.
+- In per-tick training modes the game does not advance until the waiting player responds.
 
 ## Skill URL
 

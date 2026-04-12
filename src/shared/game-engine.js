@@ -176,11 +176,28 @@ export function applyAction(match, action) {
       return resetRound(match, { preserveScore: true, preserveWinner: false });
     case 'direction':
       return queueDirection(match, action.player, action.direction);
+    case 'stay':
+    case 'noop':
+      match.updatedAt = Date.now();
+      return match;
     case 'advance':
       return advanceByTime(match, Number(action.deltaMs) || 0);
     default:
       return match;
   }
+}
+
+export function advanceOneTick(match, hooks = {}) {
+  if (match.state !== 'running') {
+    return match;
+  }
+
+  hooks.onBeforeTick?.(match);
+  match.elapsedMs += match.tickMs;
+  stepMatch(match);
+  match.accumulatorMs = 0;
+  match.updatedAt = Date.now();
+  return match;
 }
 
 export function advanceByTime(match, deltaMs, hooks = {}) {
@@ -231,6 +248,9 @@ export function parseTextCommand(commandText) {
   if (normalized === 'up' || normalized === 'down' || normalized === 'left' || normalized === 'right') {
     return { actions: [{ type: 'direction', player: 'player1', direction: normalized }] };
   }
+  if (normalized === 'stay' || normalized === 'noop') {
+    return { actions: [{ type: 'stay' }] };
+  }
 
   const parts = normalized.split(/\s+/);
   if (parts.length === 2 && isPlayerToken(parts[0]) && isDirectionToken(parts[1])) {
@@ -242,6 +262,15 @@ export function parseTextCommand(commandText) {
       }],
     };
   }
+
+    if (parts.length === 2 && isPlayerToken(parts[0]) && (parts[1] === 'stay' || parts[1] === 'noop')) {
+      return {
+        actions: [{
+          type: 'stay',
+          player: normalizePlayer(parts[0]),
+        }],
+      };
+    }
 
   if (parts.length === 3 && parts[0] === 'tick' && parts[1] === 'for') {
     return { actions: [{ type: 'advance', deltaMs: Number(parts[2]) || 0 }] };
