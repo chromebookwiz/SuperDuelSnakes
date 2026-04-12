@@ -18,6 +18,8 @@ This repository now contains two versions of DuelSnakes:
 - Room creation and join-by-code flow backed by Vercel API endpoints for browser-to-browser matches.
 - Durable free-tier room storage when `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are configured.
 - Room revision numbers, expiry timestamps, and recent room events for better debugging and agent orchestration.
+- Bot room support for single-player sessions where player 2 is driven by the API.
+- Replay/history endpoint for recent room frames and event trails.
 
 ## Development
 
@@ -61,6 +63,7 @@ If those env vars are missing, the app still works, but rooms are ephemeral and 
 - `POST /api/rooms/create`
 - `POST /api/rooms/join`
 - `GET /api/rooms/state?roomCode=XXXXXX`
+- `GET /api/rooms/history?roomCode=XXXXXX&limit=40`
 - `POST /api/rooms/command`
 
 ## Room Model
@@ -68,6 +71,9 @@ If those env vars are missing, the app still works, but rooms are ephemeral and 
 - Rooms are server-relayed and synchronized through the API.
 - Join codes are six characters.
 - The API returns backend metadata, a room revision, expiry timestamp, and recent room events.
+- Room history exposes recent replay frames with ASCII board snapshots for debugging, evaluation, or agent training.
+- Room creation accepts `opponent: "human" | "bot"`.
+- Durable Upstash writes are serialized with a short-lived room lock to avoid concurrent overwrite races on free-tier serverless execution.
 - The included fallback backend is in-memory for local development and zero-config previews.
 - On free-tier Vercel, durable multi-instance room state is supported through Upstash Redis REST credentials.
 

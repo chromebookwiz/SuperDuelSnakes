@@ -183,7 +183,7 @@ export function applyAction(match, action) {
   }
 }
 
-export function advanceByTime(match, deltaMs) {
+export function advanceByTime(match, deltaMs, hooks = {}) {
   const boundedDelta = clamp(Number(deltaMs) || 0, 0, 1000);
   if (boundedDelta <= 0 || match.state !== 'running') {
     return match;
@@ -193,6 +193,7 @@ export function advanceByTime(match, deltaMs) {
   match.accumulatorMs += boundedDelta;
 
   while (match.accumulatorMs >= match.tickMs) {
+    hooks.onBeforeTick?.(match);
     stepMatch(match);
     match.accumulatorMs -= match.tickMs;
     if (match.state !== 'running') {
@@ -298,6 +299,40 @@ export function renderAsciiBoard(match) {
   ].join(' ');
 
   return [header, ...board.map((row) => row.join(' '))].join('\n');
+}
+
+export function chooseBotDirection(match, playerKey = 'player2') {
+  const snake = playerKey === 'player1' ? match.snake1 : match.snake2;
+  const opponent = playerKey === 'player1' ? match.snake2 : match.snake1;
+  if (!snake || !opponent) {
+    return null;
+  }
+
+  const legalDirections = getLegalDirections(snake);
+  const candidates = legalDirections.map((direction) => {
+    const vector = DIRECTION_VECTORS[direction];
+    const nextHead = getNextHead(snake.body[0], vector, match.settings);
+    const immediateDeath = isDangerCell(match, nextHead, playerKey);
+    const foodDistance = manhattanDistance(nextHead, match.food);
+    const centerBias = manhattanDistance(nextHead, {
+      x: Math.floor(match.settings.cellCount / 2),
+      y: Math.floor(match.settings.cellCount / 2),
+    });
+    const pressure = manhattanDistance(nextHead, opponent.body[0]);
+
+    return {
+      direction,
+      score: [
+        immediateDeath ? -1000 : 0,
+        immediateDeath ? 0 : 100 - foodDistance * 4,
+        immediateDeath ? 0 : pressure * 1.5,
+        immediateDeath ? 0 : -centerBias,
+      ].reduce((sum, value) => sum + value, 0),
+    };
+  });
+
+  candidates.sort((left, right) => right.score - left.score);
+  return candidates[0]?.direction ?? null;
 }
 
 function stepMatch(match) {
@@ -488,4 +523,36 @@ function isCellInBounds(cell, cellCount) {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function getNextHead(head, vector, settings) {
+  const candidate = {
+    x: head.x + vector.x,
+    y: head.y + vector.y,
+  };
+
+  if (!settings.wrapWalls) {
+    return candidate;
+  }
+
+  return {
+    x: (candidate.x + settings.cellCount) % settings.cellCount,
+    y: (candidate.y + settings.cellCount) % settings.cellCount,
+  };
+}
+
+function isDangerCell(match, cell, playerKey) {
+  if (!match.settings.wrapWalls && isOutOfBounds(cell, match.settings.cellCount)) {
+    return true;
+  }
+
+  const ownSnake = playerKey === 'player1' ? match.snake1 : match.snake2;
+  const otherSnake = playerKey === 'player1' ? match.snake2 : match.snake1;
+  const ownBody = ownSnake.body.slice(0, -1);
+  const otherBody = otherSnake.body;
+  return containsCell(ownBody, cell) || containsCell(otherBody, cell);
+}
+
+function manhattanDistance(a, b) {
+  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 }

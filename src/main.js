@@ -1,5 +1,5 @@
 import './style.css';
-import { createRoom, fetchApiSchema, fetchRoomState, joinRoom, sendRoomCommand } from './api-client.js';
+import { createRoom, fetchApiSchema, fetchRoomHistory, fetchRoomState, joinRoom, sendRoomCommand } from './api-client.js';
 import { DIRECTION_VECTORS, parseTextCommand, renderAsciiBoard } from './shared/game-engine.js';
 import { BACKDROP_STYLES, DEFAULT_SETTINGS, GRID_STYLES, THEMES } from './themes.js';
 
@@ -215,6 +215,7 @@ app.innerHTML = `
             <p>Create a hosted room, share the code, and play against a second browser through API-synced state.</p>
             <div class="room-grid">
               <button class="button button-primary" id="createRoomButton" type="button">Create Room</button>
+              <button class="button button-secondary" id="createBotRoomButton" type="button">Create Bot Room</button>
               <div class="room-join-row">
                 <input class="text-input" id="roomCodeInput" type="text" maxlength="6" placeholder="ROOM CODE" />
                 <button class="button button-secondary" id="joinRoomButton" type="button">Join</button>
@@ -240,6 +241,7 @@ app.innerHTML = `
             </div>
             <div class="actions">
               <button class="button button-secondary" id="refreshTextButton" type="button">Refresh Snapshot</button>
+              <button class="button button-secondary" id="roomHistoryButton" type="button">Room History</button>
               <button class="button button-secondary" id="apiDocsButton" type="button">API Schema</button>
             </div>
             <pre class="terminal-board" id="textBoard"></pre>
@@ -287,6 +289,7 @@ const elements = {
   statusNote: document.querySelector('#statusNote'),
   touchButtons: document.querySelectorAll('.touch-button'),
   createRoomButton: document.querySelector('#createRoomButton'),
+  createBotRoomButton: document.querySelector('#createBotRoomButton'),
   roomCodeInput: document.querySelector('#roomCodeInput'),
   joinRoomButton: document.querySelector('#joinRoomButton'),
   leaveRoomButton: document.querySelector('#leaveRoomButton'),
@@ -296,6 +299,7 @@ const elements = {
   textCommandInput: document.querySelector('#textCommandInput'),
   sendCommandButton: document.querySelector('#sendCommandButton'),
   refreshTextButton: document.querySelector('#refreshTextButton'),
+  roomHistoryButton: document.querySelector('#roomHistoryButton'),
   apiDocsButton: document.querySelector('#apiDocsButton'),
   textBoard: document.querySelector('#textBoard'),
   apiLog: document.querySelector('#apiLog'),
@@ -309,6 +313,7 @@ const roomSession = {
   token: '',
   role: 'local',
   backend: 'browser-local',
+  opponent: 'local',
   pollTimer: 0,
   lastSnapshot: null,
 };
@@ -1373,7 +1378,7 @@ function updateLocalTextBoard() {
 
 function updateRoomMeta() {
   elements.roomStatus.textContent = roomSession.active ? `Room ${roomSession.roomCode}` : 'No active room';
-  elements.roomRole.textContent = `Role: ${roomSession.role}`;
+  elements.roomRole.textContent = `Role: ${roomSession.role} • Opponent: ${roomSession.opponent}`;
   const durability = roomSession.lastSnapshot?.durable ? 'durable' : roomSession.active ? 'ephemeral fallback' : 'browser-local';
   elements.roomBackend.textContent = `Backend: ${roomSession.backend} • ${durability}`;
 }
@@ -1390,6 +1395,7 @@ function applyRoomSnapshot(room) {
   roomSession.active = true;
   roomSession.roomCode = room.roomCode;
   roomSession.backend = room.backend;
+  roomSession.opponent = room.opponent?.kind ?? 'human';
   game.applyRemoteSnapshot(room.match);
   renderTextBoard(room.match.boardText);
   updateRoomMeta();
@@ -1422,6 +1428,7 @@ function leaveRoomSession() {
   roomSession.token = '';
   roomSession.role = 'local';
   roomSession.backend = 'browser-local';
+  roomSession.opponent = 'local';
   roomSession.lastSnapshot = null;
   game.disableRemoteMode();
   game.resetRound();
@@ -1640,6 +1647,21 @@ elements.createRoomButton.addEventListener('click', async () => {
   }
 });
 
+elements.createBotRoomButton.addEventListener('click', async () => {
+  try {
+    const payload = await createRoom(settings, { opponent: 'bot' });
+    roomSession.token = payload.token;
+    roomSession.role = payload.role;
+    applyRoomSnapshot(payload.room);
+    startRoomPolling();
+    setStatus(`Bot room ${payload.room.roomCode} created.`);
+    clearStatusAfterDelay();
+    setApiLog('Bot room created. Player 2 is now controlled by the API bot.');
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : 'Unable to create bot room.');
+  }
+});
+
 elements.joinRoomButton.addEventListener('click', async () => {
   const roomCode = elements.roomCodeInput.value.trim().toUpperCase();
   if (!roomCode) {
@@ -1685,6 +1707,26 @@ elements.refreshTextButton.addEventListener('click', () => {
   }
   updateLocalTextBoard();
   setApiLog('Rendered local snapshot.');
+});
+
+elements.roomHistoryButton.addEventListener('click', async () => {
+  if (!roomSession.active) {
+    setApiLog('Room history is only available while connected to a room.');
+    return;
+  }
+
+  try {
+    const history = await fetchRoomHistory(roomSession.roomCode, 12);
+    setApiLog([
+      `history for ${history.roomCode}`,
+      `backend: ${history.backend}`,
+      `opponent: ${history.opponent?.kind ?? 'human'}`,
+      '',
+      ...history.history.map((entry) => `r${entry.revision} ${entry.reason} ${entry.state} ${entry.winner ?? 'none'} ${entry.elapsedMs}ms`),
+    ].join('\n'));
+  } catch (error) {
+    setApiLog(error instanceof Error ? error.message : 'Unable to load room history.');
+  }
 });
 
 elements.apiDocsButton.addEventListener('click', async () => {
