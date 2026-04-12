@@ -33,6 +33,8 @@ export function normalizeSettings(raw = {}) {
     theme,
     backdropStyle,
     gridStyle,
+    snake1Color: normalizeSnakeColor(raw.snake1Color, DEFAULT_SETTINGS.snake1Color),
+    snake2Color: normalizeSnakeColor(raw.snake2Color, DEFAULT_SETTINGS.snake2Color),
     wrapWalls: Boolean(raw.wrapWalls),
     showTrails: raw.showTrails !== false,
     soundEnabled: raw.soundEnabled !== false,
@@ -334,35 +336,47 @@ export function renderAsciiBoard(match) {
 export function chooseBotDirection(match, playerKey = 'player2') {
   const snake = playerKey === 'player1' ? match.snake1 : match.snake2;
   const opponent = playerKey === 'player1' ? match.snake2 : match.snake1;
+  const opponentKey = playerKey === 'player1' ? 'player2' : 'player1';
   if (!snake || !opponent) {
     return null;
   }
 
   const legalDirections = getLegalDirections(snake);
+  const opponentDirections = getLegalDirections(opponent);
+  const center = {
+    x: Math.floor(match.settings.cellCount / 2),
+    y: Math.floor(match.settings.cellCount / 2),
+  };
+
   const candidates = legalDirections.map((direction) => {
-    const vector = DIRECTION_VECTORS[direction];
-    const nextHead = getNextHead(snake.body[0], vector, match.settings);
-    const immediateDeath = isDangerCell(match, nextHead, playerKey);
-    const foodDistance = manhattanDistance(nextHead, match.food);
-    const centerBias = manhattanDistance(nextHead, {
-      x: Math.floor(match.settings.cellCount / 2),
-      y: Math.floor(match.settings.cellCount / 2),
+    const outcomes = (opponentDirections.length > 0 ? opponentDirections : [opponent.directionName]).map((opponentDirection) => {
+      const simulation = simulateBotTurn(match, {
+        [playerKey]: direction,
+        [opponentKey]: opponentDirection,
+      });
+
+      return scoreSimulatedState(match, simulation, playerKey, opponentKey, center);
     });
-    const pressure = manhattanDistance(nextHead, opponent.body[0]);
+
+    const worstCase = Math.min(...outcomes);
+    const averageCase = outcomes.reduce((sum, value) => sum + value, 0) / outcomes.length;
+    const keepMomentumBonus = direction === snake.directionName ? 4 : 0;
 
     return {
       direction,
-      score: [
-        immediateDeath ? -1000 : 0,
-        immediateDeath ? 0 : 100 - foodDistance * 4,
-        immediateDeath ? 0 : pressure * 1.5,
-        immediateDeath ? 0 : -centerBias,
-      ].reduce((sum, value) => sum + value, 0),
+      worstCase: worstCase + keepMomentumBonus,
+      averageCase,
     };
   });
 
-  candidates.sort((left, right) => right.score - left.score);
-  return candidates[0]?.direction ?? null;
+  candidates.sort((left, right) => {
+    if (right.worstCase !== left.worstCase) {
+      return right.worstCase - left.worstCase;
+    }
+    return right.averageCase - left.averageCase;
+  });
+
+  return candidates[0]?.direction ?? snake.directionName ?? null;
 }
 
 function stepMatch(match) {
@@ -555,6 +569,11 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function normalizeSnakeColor(value, fallback) {
+  const normalized = String(value || '').trim();
+  return /^#[0-9a-fA-F]{6}$/.test(normalized) ? normalized.toLowerCase() : fallback;
+}
+
 function getNextHead(head, vector, settings) {
   const candidate = {
     x: head.x + vector.x,
@@ -585,4 +604,175 @@ function isDangerCell(match, cell, playerKey) {
 
 function manhattanDistance(a, b) {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+}
+
+function simulateBotTurn(match, plannedDirections) {
+  const previousHeads = {
+    snake1: cloneCell(match.snake1.body[0]),
+    snake2: cloneCell(match.snake2.body[0]),
+  };
+  const snake1 = simulateSnakeStep(match.snake1, plannedDirections.player1, match);
+  const snake2 = simulateSnakeStep(match.snake2, plannedDirections.player2, match);
+
+  return {
+    settings: match.settings,
+    food: cloneCell(match.food),
+    snake1,
+    snake2,
+    previousHeads,
+    winner: resolveSimulatedWinner({ settings: match.settings, snake1, snake2, previousHeads }),
+  };
+}
+
+function simulateSnakeStep(snake, directionName, match) {
+  const nextDirectionName = directionName || snake.directionName;
+  const vector = DIRECTION_VECTORS[nextDirectionName] || snake.direction;
+  const nextHead = getNextHead(snake.body[0], vector, match.settings);
+  const willEat = sameCell(nextHead, match.food);
+  const nextBody = [nextHead, ...snake.body.map(cloneCell)];
+
+  if (!(snake.grow || willEat)) {
+    nextBody.pop();
+  }
+
+  return {
+    ...snake,
+    body: nextBody,
+    direction: { ...vector },
+    queuedDirection: { ...vector },
+    directionName: nextDirectionName,
+    queuedDirectionName: nextDirectionName,
+  };
+}
+
+function resolveSimulatedWinner(simulation) {
+  const out1 = !simulation.settings.wrapWalls && isOutOfBounds(simulation.snake1.body[0], simulation.settings.cellCount);
+  const out2 = !simulation.settings.wrapWalls && isOutOfBounds(simulation.snake2.body[0], simulation.settings.cellCount);
+
+  if (out1 && out2) {
+    return 'Draw';
+  }
+  if (out1) {
+    return 'Player 2';
+  }
+  if (out2) {
+    return 'Player 1';
+  }
+
+  const snake1NoHead = simulation.snake1.body.slice(1);
+  const snake2NoHead = simulation.snake2.body.slice(1);
+  const snake1Hits = containsCell(snake1NoHead, simulation.snake1.body[0]) || containsCell(simulation.snake2.body, simulation.snake1.body[0]);
+  const snake2Hits = containsCell(snake2NoHead, simulation.snake2.body[0]) || containsCell(simulation.snake1.body, simulation.snake2.body[0]);
+  const headOn = sameCell(simulation.snake1.body[0], simulation.snake2.body[0]);
+  const headSwap =
+    simulation.previousHeads &&
+    sameCell(simulation.snake1.body[0], simulation.previousHeads.snake2) &&
+    sameCell(simulation.snake2.body[0], simulation.previousHeads.snake1);
+
+  if (headOn || headSwap || (snake1Hits && snake2Hits)) {
+    return 'Draw';
+  }
+  if (snake1Hits) {
+    return 'Player 2';
+  }
+  if (snake2Hits) {
+    return 'Player 1';
+  }
+
+  return null;
+}
+
+function scoreSimulatedState(match, simulation, playerKey, opponentKey, center) {
+  const myWinnerLabel = playerKey === 'player1' ? 'Player 1' : 'Player 2';
+  const opponentWinnerLabel = opponentKey === 'player1' ? 'Player 1' : 'Player 2';
+
+  if (simulation.winner === myWinnerLabel) {
+    return 1_000_000;
+  }
+  if (simulation.winner === opponentWinnerLabel) {
+    return -1_000_000;
+  }
+  if (simulation.winner === 'Draw') {
+    return -25_000;
+  }
+
+  const mySnake = playerKey === 'player1' ? simulation.snake1 : simulation.snake2;
+  const opponentSnake = opponentKey === 'player1' ? simulation.snake1 : simulation.snake2;
+  const myHead = mySnake.body[0];
+  const opponentHead = opponentSnake.body[0];
+  const mySpace = floodFillReachable(simulation, playerKey);
+  const opponentSpace = floodFillReachable(simulation, opponentKey);
+  const mySafeMoves = countSafeFollowUps(simulation, playerKey);
+  const opponentSafeMoves = countSafeFollowUps(simulation, opponentKey);
+  const foodDistance = manhattanDistance(myHead, match.food);
+  const centerBias = manhattanDistance(myHead, center);
+  const pressure = manhattanDistance(myHead, opponentHead);
+  const ateFood = sameCell(myHead, match.food);
+  const tightHeadToHeadPenalty = pressure <= 2 && mySpace <= opponentSpace ? 120 : 0;
+
+  return (
+    mySpace * 24
+    - opponentSpace * 11
+    + mySafeMoves * 140
+    - opponentSafeMoves * 70
+    - foodDistance * 6
+    - centerBias
+    + pressure * 3
+    + (ateFood ? 180 : 0)
+    - tightHeadToHeadPenalty
+  );
+}
+
+function countSafeFollowUps(simulation, playerKey) {
+  const snake = playerKey === 'player1' ? simulation.snake1 : simulation.snake2;
+  return getLegalDirections(snake).filter((direction) => {
+    const nextHead = getNextHead(snake.body[0], DIRECTION_VECTORS[direction], simulation.settings);
+    return !isProjectedDangerCell(simulation, nextHead, playerKey);
+  }).length;
+}
+
+function floodFillReachable(simulation, playerKey) {
+  const snake = playerKey === 'player1' ? simulation.snake1 : simulation.snake2;
+  const opponent = playerKey === 'player1' ? simulation.snake2 : simulation.snake1;
+  const blocked = new Set();
+  const queue = [snake.body[0]];
+  const visited = new Set([cellKey(snake.body[0])]);
+
+  snake.body.slice(1).forEach((cell) => blocked.add(cellKey(cell)));
+  opponent.body.forEach((cell) => blocked.add(cellKey(cell)));
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    for (const neighbor of getFloodNeighbors(current, simulation.settings)) {
+      const key = cellKey(neighbor);
+      if (visited.has(key) || blocked.has(key)) {
+        continue;
+      }
+      visited.add(key);
+      queue.push(neighbor);
+    }
+  }
+
+  return visited.size;
+}
+
+function getFloodNeighbors(cell, settings) {
+  return Object.values(DIRECTION_VECTORS)
+    .map((vector) => getNextHead(cell, vector, settings))
+    .filter((candidate) => settings.wrapWalls || isCellInBounds(candidate, settings.cellCount));
+}
+
+function isProjectedDangerCell(simulation, cell, playerKey) {
+  if (!simulation.settings.wrapWalls && isOutOfBounds(cell, simulation.settings.cellCount)) {
+    return true;
+  }
+
+  const ownSnake = playerKey === 'player1' ? simulation.snake1 : simulation.snake2;
+  const otherSnake = playerKey === 'player1' ? simulation.snake2 : simulation.snake1;
+  const ownBody = ownSnake.body.slice(0, -1);
+  return containsCell(ownBody, cell) || containsCell(otherSnake.body, cell);
+}
+
+function cellKey(cell) {
+  return `${cell.x}:${cell.y}`;
 }

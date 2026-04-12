@@ -143,6 +143,8 @@ export const DEFAULT_SETTINGS = {
   theme: 'originalArcade',
   gridStyle: 'classic',
   backdropStyle: 'none',
+  snake1Color: '#00d528',
+  snake2Color: '#3299d5',
   wrapWalls: false,
   showTrails: false,
   soundEnabled: true,

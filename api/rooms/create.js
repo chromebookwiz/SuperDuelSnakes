@@ -21,6 +21,7 @@ export default async function handler(req, res) {
       opponent: body.opponent,
       playerModes: body.playerModes,
       agentTiming: body.agentTiming,
+      allowAutomationRooms: body.allowAutomationRooms === true,
     });
     const agentAccess = Object.fromEntries(
       Object.entries(created.room.controllers)

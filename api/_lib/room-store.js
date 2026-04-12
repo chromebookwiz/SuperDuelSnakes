@@ -657,10 +657,16 @@ function normalizeRoomCode(roomCode) {
 
 function normalizeControllers(options) {
   if (options.playerModes && typeof options.playerModes === 'object') {
-    return {
+    const controllers = {
       player1: normalizeController(options.playerModes.player1),
       player2: normalizeController(options.playerModes.player2),
     };
+
+    if (!options.allowAutomationRooms && (controllers.player1 !== 'human' || controllers.player2 !== 'human')) {
+      throw new Error('Rooms created from the main room flow must be human versus human. Use automation modes for bot and LLM matches.');
+    }
+
+    return controllers;
   }
 
   if (options.opponent === 'agent') {
