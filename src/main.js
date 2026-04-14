@@ -1,6 +1,6 @@
 import './style.css';
 import { createRoom, fetchApiSchema, fetchRoomHistory, fetchRoomState, fetchRoomTurn, joinRoom, sendRoomCommand } from './api-client.js';
-import { DIRECTION_VECTORS, parseTextCommand, renderAsciiBoard } from './shared/game-engine.js';
+import { chooseBotDirection, DIRECTION_VECTORS, parseTextCommand, renderAsciiBoard } from './shared/game-engine.js';
 import { BACKDROP_STYLES, DEFAULT_SETTINGS, GRID_STYLES, THEMES } from './themes.js';
 
 const SETTINGS_KEY = 'duelsnakes.arena.settings';
@@ -396,6 +396,7 @@ const elements = {
   llmProviderStatus: document.querySelector('#llmProviderStatus'),
   pendingNote: document.querySelector('#pendingNote'),
   statusNote: document.querySelector('#statusNote'),
+  touchCards: document.querySelectorAll('.touch-card'),
   touchButtons: document.querySelectorAll('.touch-button'),
   createRoomButton: document.querySelector('#createRoomButton'),
   roomCodeInput: document.querySelector('#roomCodeInput'),
@@ -427,6 +428,7 @@ const roomSession = {
 };
 let activeScreen = 'home';
 let configMode = 'settings';
+let localControllers = { player1: 'human', player2: 'human' };
 let llmSettings = {
   provider: localStorage.getItem(LLM_PROVIDER_KEY) || 'openrouter',
   endpoint: localStorage.getItem(LLM_ENDPOINT_KEY) || '',
@@ -911,6 +913,7 @@ function returnToMenu() {
   } else if (game.state === 'running') {
     game.pause();
   }
+  updateControlHints();
   showScreen('home');
 }
 
@@ -918,10 +921,12 @@ function resetLocalGame() {
   if (roomSession.active) {
     leaveRoomSession();
   }
+  configureLocalControllers(localControllers);
   game.disableRemoteMode();
   game.winner = null;
   game.resetRound();
   updateLocalTextBoard();
+  updateControlHints();
 }
 
 async function createConfiguredRoomSession(playerModes, agentTiming = 'turn-based') {
@@ -1262,9 +1267,19 @@ class DuelSnakesGame {
   }
 
   createSnake(body, direction, id) {
+    const directionName = direction.x > 0
+      ? 'right'
+      : direction.x < 0
+        ? 'left'
+        : direction.y > 0
+          ? 'down'
+          : 'up';
+
     return {
       id,
       body,
+      directionName,
+      queuedDirectionName: directionName,
       direction: { ...direction },
       queuedDirection: { ...direction },
       grow: false,
@@ -1297,10 +1312,25 @@ class DuelSnakesGame {
     ) {
       return;
     }
+    snake.queuedDirectionName = direction.x > 0
+      ? 'right'
+      : direction.x < 0
+        ? 'left'
+        : direction.y > 0
+          ? 'down'
+          : 'up';
     snake.queuedDirection = direction;
     if (this.state === 'stopped' && !this.winner) {
       this.start();
     }
+  }
+
+  setLocalControllers(controllers) {
+    this.localControllers = {
+      player1: controllers.player1 || 'human',
+      player2: controllers.player2 || 'human',
+    };
+    this.renderOverlay();
   }
 
   start() {
@@ -1386,6 +1416,8 @@ class DuelSnakesGame {
   }
 
   step() {
+    this.planLocalControllers();
+
     this.previousHeads = {
       snake1: { ...this.snake1.body[0] },
       snake2: { ...this.snake2.body[0] },
@@ -1432,10 +1464,32 @@ class DuelSnakesGame {
       ...snake,
       body: nextBody,
       direction: { ...direction },
+      directionName: snake.queuedDirectionName,
       queuedDirection: { ...direction },
+      queuedDirectionName: snake.queuedDirectionName,
       grow: false,
       trail,
     };
+  }
+
+  planLocalControllers() {
+    if (this.remoteMode || this.state !== 'running') {
+      return;
+    }
+
+    const snapshot = this.getSnapshot();
+    if (this.localControllers.player1 === 'bot') {
+      const direction = chooseBotDirection(snapshot, 'player1');
+      if (direction && DIRECTION_VECTORS[direction]) {
+        this.setDirection(1, DIRECTION_VECTORS[direction]);
+      }
+    }
+    if (this.localControllers.player2 === 'bot') {
+      const direction = chooseBotDirection(snapshot, 'player2');
+      if (direction && DIRECTION_VECTORS[direction]) {
+        this.setDirection(2, DIRECTION_VECTORS[direction]);
+      }
+    }
   }
 
   handleFood() {
@@ -1607,7 +1661,9 @@ class DuelSnakesGame {
       copy = 'Tap Space or the start button to continue. Round time is frozen while paused.';
     } else if (this.state === 'stopped') {
       title = 'Ready to Launch';
-      copy = 'First movement input starts the duel. Player 1 uses WASD. Player 2 uses the arrow keys.';
+      copy = this.localControllers?.player2 === 'human'
+        ? 'First movement input starts the duel. Player 1 uses WASD. Player 2 uses the arrow keys.'
+        : 'First movement input starts the duel. Use WASD to control Player 1 against the automated opponent.';
     }
 
     if (!title) {
@@ -2078,6 +2134,7 @@ const game = new DuelSnakesGame(elements.canvas, {
 }, audio);
 
 game.applySettings(settings, { restart: true });
+game.setLocalControllers(localControllers);
 
 function markStructuralChange() {
   pendingStructuralChange = true;
@@ -2122,6 +2179,51 @@ function updateLocalTextBoard() {
   renderTextBoard(renderAsciiBoard(game.getSnapshot()));
 }
 
+function getActiveControllers() {
+  return roomSession.active ? roomSession.controllers : localControllers;
+}
+
+function getLocallyControlledPlayers() {
+  if (roomSession.active) {
+    if (roomSession.role === 'player1' || roomSession.role === 'player2') {
+      return new Set([roomSession.role]);
+    }
+    return new Set();
+  }
+
+  return new Set(Object.entries(localControllers)
+    .filter(([, controller]) => controller === 'human')
+    .map(([playerKey]) => playerKey));
+}
+
+function updateControlHints() {
+  const activeControllers = getActiveControllers();
+  const localPlayers = getLocallyControlledPlayers();
+
+  elements.touchCards.forEach((card, index) => {
+    const playerKey = index === 0 ? 'player1' : 'player2';
+    const isHuman = activeControllers[playerKey] === 'human' && localPlayers.has(playerKey);
+    card.classList.toggle('touch-card-inactive', !isHuman);
+  });
+
+  elements.touchButtons.forEach((button) => {
+    const playerKey = button.dataset.player === '2' ? 'player2' : 'player1';
+    const enabled = activeControllers[playerKey] === 'human' && localPlayers.has(playerKey);
+    button.disabled = !enabled;
+    button.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+  });
+}
+
+function configureLocalControllers(controllers) {
+  localControllers = {
+    player1: controllers.player1 || 'human',
+    player2: controllers.player2 || 'human',
+  };
+  game.disableRemoteMode();
+  game.setLocalControllers(localControllers);
+  updateControlHints();
+}
+
 function updateRoomMeta() {
   elements.roomStatus.textContent = roomSession.active ? roomSession.roomCode : '';
   elements.roomStatus.classList.toggle('is-visible', roomSession.active);
@@ -2144,6 +2246,7 @@ function applyRoomSnapshot(room) {
   game.applyRemoteSnapshot(room.match);
   renderTextBoard(room.match.boardText);
   updateRoomMeta();
+  updateControlHints();
   updateTraceWindows();
 }
 
@@ -2204,8 +2307,10 @@ function leaveRoomSession() {
   roomSession.agentAccess = null;
   roomSession.lastSnapshot = null;
   game.disableRemoteMode();
+  game.setLocalControllers(localControllers);
   game.resetRound();
   updateRoomMeta();
+  updateControlHints();
   updateLocalTextBoard();
 }
 
@@ -2311,9 +2416,17 @@ async function executeTextCommand() {
 }
 
 async function handleDirectionalInput(player, directionName) {
+  const playerKey = player === 2 ? 'player2' : 'player1';
+  const activeControllers = getActiveControllers();
+  const localPlayers = getLocallyControlledPlayers();
+
+  if (activeControllers[playerKey] !== 'human' || !localPlayers.has(playerKey)) {
+    return;
+  }
+
   if (roomSession.active) {
     try {
-      await sendRoomAction({ type: 'direction', direction: directionName, player: player === 2 ? 'player2' : 'player1' });
+      await sendRoomAction({ type: 'direction', direction: directionName, player: playerKey });
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Unable to send room move.');
     }
@@ -2467,6 +2580,7 @@ elements.backFromConfigButton.addEventListener('click', returnToMenu);
 elements.returnHomeButton.addEventListener('click', returnToMenu);
 
 elements.playLocalButton.addEventListener('click', () => {
+  configureLocalControllers({ player1: 'human', player2: 'human' });
   resetLocalGame();
   enterGameScreen();
   void startCurrentMatch();
@@ -2475,15 +2589,12 @@ elements.playLocalButton.addEventListener('click', () => {
 });
 
 elements.playBotButton.addEventListener('click', async () => {
-  try {
-    await createConfiguredRoomSession({ player1: 'human', player2: 'bot' }, 'turn-based');
-    enterGameScreen();
-    void startCurrentMatch();
-    setStatus('Play versus bot ready.');
-    clearStatusAfterDelay();
-  } catch (error) {
-    setStatus(error instanceof Error ? error.message : 'Unable to start play versus bot.');
-  }
+  configureLocalControllers({ player1: 'human', player2: 'bot' });
+  resetLocalGame();
+  enterGameScreen();
+  void startCurrentMatch();
+  setStatus('Play versus bot ready. Use WASD for Player 1.');
+  clearStatusAfterDelay();
 });
 
 elements.automationPlayVsLlmButton.addEventListener('click', async () => {
@@ -2674,6 +2785,9 @@ elements.touchButtons.forEach((button) => {
     if (!(target instanceof HTMLButtonElement)) {
       return;
     }
+    if (target.disabled) {
+      return;
+    }
     const player = Number.parseInt(target.dataset.player ?? '1', 10);
     void handleDirectionalInput(player, target.dataset.direction ?? 'right');
   });
@@ -2713,18 +2827,30 @@ window.addEventListener('keydown', (event) => {
       void handleDirectionalInput(1, 'right');
       break;
     case 'ArrowUp':
+      if (!getLocallyControlledPlayers().has('player2')) {
+        break;
+      }
       event.preventDefault();
       void handleDirectionalInput(2, 'up');
       break;
     case 'ArrowDown':
+      if (!getLocallyControlledPlayers().has('player2')) {
+        break;
+      }
       event.preventDefault();
       void handleDirectionalInput(2, 'down');
       break;
     case 'ArrowLeft':
+      if (!getLocallyControlledPlayers().has('player2')) {
+        break;
+      }
       event.preventDefault();
       void handleDirectionalInput(2, 'left');
       break;
     case 'ArrowRight':
+      if (!getLocallyControlledPlayers().has('player2')) {
+        break;
+      }
       event.preventDefault();
       void handleDirectionalInput(2, 'right');
       break;

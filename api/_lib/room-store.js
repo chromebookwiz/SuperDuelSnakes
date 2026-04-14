@@ -673,7 +673,7 @@ function normalizeControllers(options) {
     return { player1: 'human', player2: 'agent' };
   }
   if (options.opponent === 'bot') {
-    return { player1: 'agent', player2: 'bot' };
+    return { player1: 'human', player2: 'bot' };
   }
   return { player1: 'human', player2: 'human' };
 }

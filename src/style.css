@@ -691,6 +691,10 @@ input[type='range']::-moz-range-thumb {
   padding: 16px;
 }
 
+.touch-card-inactive {
+  opacity: 0.45;
+}
+
 .touch-card span {
   margin-bottom: 12px;
 }
@@ -709,6 +713,11 @@ input[type='range']::-moz-range-thumb {
   font-size: 1.2rem;
   touch-action: manipulation;
   user-select: none;
+}
+
+.touch-button:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .touch-button:active {
