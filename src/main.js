@@ -11,6 +11,34 @@ const LLM_MODEL_KEY = 'duelsnakes.llm.model';
 const LLM_ENDPOINT_KEY = 'duelsnakes.llm.endpoint';
 const LLM_SECRET_KEY = 'duelsnakes.llm.secret';
 const MAX_FRAME_DELTA = 100;
+const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1';
+
+const PROVIDER_OPTIONS = {
+  openrouter: {
+    label: 'OpenRouter',
+    endpoint: '',
+    endpointPlaceholder: '',
+    modelPlaceholder: 'openai/gpt-4.1-mini',
+    apiKeyPlaceholder: 'Paste your OpenRouter API key',
+    needsEndpoint: false,
+  },
+  ollama: {
+    label: 'Ollama',
+    endpoint: 'http://localhost:11434',
+    endpointPlaceholder: 'http://localhost:11434',
+    modelPlaceholder: 'llama3.1',
+    apiKeyPlaceholder: 'Optional bearer token',
+    needsEndpoint: true,
+  },
+  vllm: {
+    label: 'vLLM / OpenAI-compatible',
+    endpoint: 'http://localhost:8000',
+    endpointPlaceholder: 'http://localhost:8000',
+    modelPlaceholder: 'your-local-model',
+    apiKeyPlaceholder: 'Optional bearer token',
+    needsEndpoint: true,
+  },
+};
 
 const app = document.querySelector('#app');
 
@@ -52,9 +80,10 @@ app.innerHTML = `
       <div class="menu-panel">
         <p class="screen-kicker">Play</p>
         <h2>Choose a duel</h2>
-        <p class="screen-copy">Keep it immediate. Local play is direct human versus human on one device.</p>
+        <p class="screen-copy">Pick the direct play mode here. Local stays on one device, or launch a quick match against the built-in bot.</p>
         <div class="menu-stack">
-          <button class="menu-button" id="playHumanButton" type="button">Human v Human</button>
+          <button class="menu-button" id="playLocalButton" type="button">2 Player Local</button>
+          <button class="menu-button" id="playBotButton" type="button">Play v Bot</button>
         </div>
         <button class="button button-ghost back-button" id="backFromPlayButton" type="button">Back</button>
       </div>
@@ -64,7 +93,7 @@ app.innerHTML = `
       <div class="menu-panel automation-panel">
         <p class="screen-kicker">Automate</p>
         <h2>Automation modes</h2>
-        <p class="screen-copy">Run autonomous matches here. Use the presets to launch bot and LLM battles, then inspect the sandbox feed below.</p>
+        <p class="screen-copy">Use the configured provider for assisted and autonomous LLM matches here.</p>
         <div class="toggle-row automation-toggle">
           <label for="automationRealtimeAgentTiming">Real time llm? (warning, probably won't work)</label>
           <label class="switch">
@@ -73,9 +102,9 @@ app.innerHTML = `
           </label>
         </div>
         <div class="menu-grid">
-          <button class="menu-button" id="automationBotVsBotButton" type="button">Bot v Bot</button>
-          <button class="menu-button" id="automationAgentVsBotButton" type="button">Agent v Bot</button>
-          <button class="menu-button" id="automationAgentVsAgentButton" type="button">LLM v LLM</button>
+          <button class="menu-button" id="automationPlayVsLlmButton" type="button">Play v LLM</button>
+          <button class="menu-button" id="automationLlmVsLlmButton" type="button">LLM v LLM</button>
+          <button class="menu-button" id="automationLlmVsBotButton" type="button">LLM v Bot</button>
         </div>
         <section class="sandbox-panel">
           <p class="screen-kicker">Sandbox</p>
@@ -99,7 +128,7 @@ app.innerHTML = `
       <div class="menu-panel join-panel">
         <p class="screen-kicker">Join Room</p>
         <h2>Enter a room code</h2>
-        <p class="screen-copy">Join an existing hosted duel. If the room includes LLM seats and this browser is expected to drive them, make sure your provider settings are saved in Settings first.</p>
+        <p class="screen-copy">Join an existing hosted duel by code.</p>
         <div class="menu-stack join-stack">
           <input class="text-input" id="roomCodeInput" type="text" maxlength="6" placeholder="ROOM CODE" />
           <button class="menu-button" id="joinRoomButton" type="button">Join Room</button>
@@ -206,6 +235,7 @@ app.innerHTML = `
           <section class="settings-group" id="llmProviderSection">
             <h3>AI Provider</h3>
             <div class="control-grid">
+              <p class="provider-current" id="llmProviderSelected">Selected provider: OpenRouter</p>
               <div class="control-row">
                 <label for="llmProvider">Provider</label>
                 <select id="llmProvider">
@@ -214,9 +244,9 @@ app.innerHTML = `
                   <option value="vllm">vLLM / OpenAI-compatible</option>
                 </select>
               </div>
-              <div class="control-row">
+              <div class="control-row" id="llmEndpointRow">
                 <label for="llmEndpoint">Endpoint</label>
-                <input class="text-input" id="llmEndpoint" type="text" placeholder="https://openrouter.ai/api/v1 or http://localhost:11434" autocomplete="off" />
+                <input class="text-input" id="llmEndpoint" type="text" placeholder="http://localhost:11434" autocomplete="off" />
               </div>
               <div class="control-row">
                 <label for="llmApiKey">API Key</label>
@@ -265,37 +295,17 @@ app.innerHTML = `
           <div class="hud-grid">
             <article class="hud-card"><span>P1</span><strong id="p1Score">0</strong></article>
             <article class="hud-card"><span>P2</span><strong id="p2Score">0</strong></article>
-            <article class="hud-card"><span>Draws</span><strong id="drawScore">0</strong></article>
             <article class="hud-card"><span>Clock</span><strong id="roundClock">00:00</strong></article>
           </div>
           <div class="game-top-actions">
-            <button class="button button-ghost" id="returnHomeButton" type="button">Menu</button>
-            <button class="button button-ghost" id="leaveRoomButton" type="button">Leave Room</button>
-            <button class="button button-ghost" id="fullscreenButton" type="button">Fullscreen</button>
-            <button class="button button-solid" id="togglePlayButton" type="button">Start Round</button>
+            <button class="button button-ghost" id="returnHomeButton" type="button">Return</button>
             <button class="button button-ghost" id="restartButton" type="button">Reset Round</button>
           </div>
-        </div>
-
-        <div class="game-meta">
-          <div class="pill"><strong id="stateLabel">Stopped</strong></div>
-          <div class="pill">Theme <strong id="themeLabel">Original Arcade</strong></div>
-          <div class="pill">Round <strong id="roundNumber">0</strong></div>
-          <div class="pill">Streak <strong id="streakLabel">None</strong></div>
-          <div class="pill" id="roomRole">Role: local</div>
-          <div class="pill" id="roomBackend">Backend: browser-local</div>
-          <div class="pill" id="arenaSummary">25x25 arena at 6 tps</div>
         </div>
 
         <div class="canvas-shell" id="canvasShell">
           <canvas class="board-canvas" id="gameCanvas"></canvas>
           <div class="canvas-overlay" id="canvasOverlay"></div>
-        </div>
-
-        <div class="game-instructions">
-          <div class="instruction-card"><span>Controls</span><strong>WASD / Arrow Keys</strong></div>
-          <div class="instruction-card"><span>Quick Keys</span><strong>Space to pause, R to reset</strong></div>
-          <div class="instruction-card"><span>Mode</span><strong>Arcade duel</strong></div>
         </div>
 
         <section class="touch-panel" aria-label="Touch controls">
@@ -318,17 +328,6 @@ app.innerHTML = `
             </div>
           </div>
         </section>
-
-        <section class="llm-trace-panel" id="llmTracePanel">
-          <article class="llm-trace-window visually-hidden" id="llmTracePlayer1">
-            <header>LLM P1</header>
-            <pre id="llmTracePlayer1Log"></pre>
-          </article>
-          <article class="llm-trace-window visually-hidden" id="llmTracePlayer2">
-            <header>LLM P2</header>
-            <pre id="llmTracePlayer2Log"></pre>
-          </article>
-        </section>
       </div>
     </section>
   </main>
@@ -341,11 +340,12 @@ const elements = {
   homeCreateRoomButton: document.querySelector('#homeCreateRoomButton'),
   homeJoinRoomButton: document.querySelector('#homeJoinRoomButton'),
   homeSettingsButton: document.querySelector('#homeSettingsButton'),
-  playHumanButton: document.querySelector('#playHumanButton'),
+  playLocalButton: document.querySelector('#playLocalButton'),
+  playBotButton: document.querySelector('#playBotButton'),
   backFromPlayButton: document.querySelector('#backFromPlayButton'),
-  automationBotVsBotButton: document.querySelector('#automationBotVsBotButton'),
-  automationAgentVsBotButton: document.querySelector('#automationAgentVsBotButton'),
-  automationAgentVsAgentButton: document.querySelector('#automationAgentVsAgentButton'),
+  automationPlayVsLlmButton: document.querySelector('#automationPlayVsLlmButton'),
+  automationLlmVsLlmButton: document.querySelector('#automationLlmVsLlmButton'),
+  automationLlmVsBotButton: document.querySelector('#automationLlmVsBotButton'),
   automationRealtimeAgentTiming: document.querySelector('#automationRealtimeAgentTiming'),
   backFromAutomationButton: document.querySelector('#backFromAutomationButton'),
   backFromJoinButton: document.querySelector('#backFromJoinButton'),
@@ -359,18 +359,10 @@ const elements = {
   returnHomeButton: document.querySelector('#returnHomeButton'),
   p1Score: document.querySelector('#p1Score'),
   p2Score: document.querySelector('#p2Score'),
-  drawScore: document.querySelector('#drawScore'),
   roundClock: document.querySelector('#roundClock'),
-  arenaSummary: document.querySelector('#arenaSummary'),
-  stateLabel: document.querySelector('#stateLabel'),
-  themeLabel: document.querySelector('#themeLabel'),
-  roundNumber: document.querySelector('#roundNumber'),
-  streakLabel: document.querySelector('#streakLabel'),
-  fullscreenButton: document.querySelector('#fullscreenButton'),
   musicToggleButton: document.querySelector('#musicToggleButton'),
   musicVolumePopover: document.querySelector('#musicVolumePopover'),
   musicVolume: document.querySelector('#musicVolume'),
-  togglePlayButton: document.querySelector('#togglePlayButton'),
   restartButton: document.querySelector('#restartButton'),
   canvas: document.querySelector('#gameCanvas'),
   canvasShell: document.querySelector('#canvasShell'),
@@ -394,6 +386,8 @@ const elements = {
   randomThemeButton: document.querySelector('#randomThemeButton'),
   resetScoresButton: document.querySelector('#resetScoresButton'),
   llmProvider: document.querySelector('#llmProvider'),
+  llmProviderSelected: document.querySelector('#llmProviderSelected'),
+  llmEndpointRow: document.querySelector('#llmEndpointRow'),
   llmEndpoint: document.querySelector('#llmEndpoint'),
   llmApiKey: document.querySelector('#llmApiKey'),
   llmModel: document.querySelector('#llmModel'),
@@ -406,10 +400,7 @@ const elements = {
   createRoomButton: document.querySelector('#createRoomButton'),
   roomCodeInput: document.querySelector('#roomCodeInput'),
   joinRoomButton: document.querySelector('#joinRoomButton'),
-  leaveRoomButton: document.querySelector('#leaveRoomButton'),
   roomStatus: document.querySelector('#roomStatus'),
-  roomRole: document.querySelector('#roomRole'),
-  roomBackend: document.querySelector('#roomBackend'),
   textCommandInput: document.querySelector('#textCommandInput'),
   sendCommandButton: document.querySelector('#sendCommandButton'),
   refreshTextButton: document.querySelector('#refreshTextButton'),
@@ -417,11 +408,6 @@ const elements = {
   apiDocsButton: document.querySelector('#apiDocsButton'),
   textBoard: document.querySelector('#textBoard'),
   apiLog: document.querySelector('#apiLog'),
-  llmTracePanel: document.querySelector('#llmTracePanel'),
-  llmTracePlayer1: document.querySelector('#llmTracePlayer1'),
-  llmTracePlayer2: document.querySelector('#llmTracePlayer2'),
-  llmTracePlayer1Log: document.querySelector('#llmTracePlayer1Log'),
-  llmTracePlayer2Log: document.querySelector('#llmTracePlayer2Log'),
 };
 
 const structuralKeys = new Set(['cellCount', 'wrapWalls']);
@@ -443,7 +429,7 @@ let activeScreen = 'home';
 let configMode = 'settings';
 let llmSettings = {
   provider: localStorage.getItem(LLM_PROVIDER_KEY) || 'openrouter',
-  endpoint: localStorage.getItem(LLM_ENDPOINT_KEY) || 'https://openrouter.ai/api/v1',
+  endpoint: localStorage.getItem(LLM_ENDPOINT_KEY) || '',
   apiKey: '',
   model: localStorage.getItem(LLM_MODEL_KEY) || 'openai/gpt-4.1-mini',
 };
@@ -532,7 +518,7 @@ async function loadLlmSettings() {
   const apiKey = encrypted ? await decryptCachedSecret(encrypted).catch(() => '') : '';
   return {
     provider: localStorage.getItem(LLM_PROVIDER_KEY) || 'openrouter',
-    endpoint: localStorage.getItem(LLM_ENDPOINT_KEY) || 'https://openrouter.ai/api/v1',
+    endpoint: localStorage.getItem(LLM_ENDPOINT_KEY) || '',
     apiKey,
     model: localStorage.getItem(LLM_MODEL_KEY) || 'openai/gpt-4.1-mini',
   };
@@ -540,14 +526,21 @@ async function loadLlmSettings() {
 
 async function saveLlmSettings(nextSettings) {
   const trimmedKey = String(nextSettings.apiKey || '').trim();
+  const provider = String(nextSettings.provider || 'openrouter');
+  const providerConfig = PROVIDER_OPTIONS[provider] || PROVIDER_OPTIONS.openrouter;
+  const trimmedEndpoint = providerConfig.needsEndpoint ? String(nextSettings.endpoint || '').trim() : '';
+  const trimmedModel = String(nextSettings.model || providerConfig.modelPlaceholder || 'openai/gpt-4.1-mini').trim()
+    || providerConfig.modelPlaceholder
+    || 'openai/gpt-4.1-mini';
+
   if (trimmedKey) {
     localStorage.setItem(LLM_SECRET_KEY, await encryptCachedSecret(trimmedKey));
   } else {
     localStorage.removeItem(LLM_SECRET_KEY);
   }
-  localStorage.setItem(LLM_PROVIDER_KEY, String(nextSettings.provider || 'openrouter'));
-  localStorage.setItem(LLM_ENDPOINT_KEY, String(nextSettings.endpoint || '').trim());
-  localStorage.setItem(LLM_MODEL_KEY, String(nextSettings.model || 'openai/gpt-4.1-mini').trim() || 'openai/gpt-4.1-mini');
+  localStorage.setItem(LLM_PROVIDER_KEY, provider);
+  localStorage.setItem(LLM_ENDPOINT_KEY, trimmedEndpoint);
+  localStorage.setItem(LLM_MODEL_KEY, trimmedModel);
 }
 
 function clearLlmSettings() {
@@ -571,40 +564,26 @@ function setLlmProviderStatus(message) {
 
 function updateLlmProviderUi() {
   const provider = elements.llmProvider.value;
-  const defaultEndpoint = provider === 'openrouter'
-    ? 'https://openrouter.ai/api/v1'
-    : provider === 'ollama'
-      ? 'http://localhost:11434'
-      : 'http://localhost:8000';
-
-  elements.llmApiKey.placeholder = provider === 'openrouter'
-    ? 'Paste your OpenRouter API key'
-    : 'Optional bearer token';
-  elements.llmEndpoint.placeholder = defaultEndpoint;
-  if (!elements.llmEndpoint.value.trim()) {
-    elements.llmEndpoint.value = defaultEndpoint;
+  const providerConfig = PROVIDER_OPTIONS[provider] || PROVIDER_OPTIONS.openrouter;
+  elements.llmProviderSelected.textContent = `Selected provider: ${providerConfig.label}`;
+  elements.llmProviderSelected.dataset.provider = provider;
+  elements.llmApiKey.placeholder = providerConfig.apiKeyPlaceholder;
+  elements.llmModel.placeholder = providerConfig.modelPlaceholder;
+  elements.llmEndpointRow.classList.toggle('visually-hidden', !providerConfig.needsEndpoint);
+  elements.llmEndpoint.placeholder = providerConfig.endpointPlaceholder;
+  if (providerConfig.needsEndpoint && !elements.llmEndpoint.value.trim()) {
+    elements.llmEndpoint.value = providerConfig.endpoint;
   }
 }
 
 function setTrace(playerKey, text) {
   llmRuntime.traces[playerKey] = text;
-  const card = playerKey === 'player1' ? elements.llmTracePlayer1 : elements.llmTracePlayer2;
-  const log = playerKey === 'player1' ? elements.llmTracePlayer1Log : elements.llmTracePlayer2Log;
-  card.classList.remove('visually-hidden');
-  log.textContent = text;
 }
 
 function updateTraceWindows() {
-  const activeAgents = roomSession.agentAccess ? Object.keys(roomSession.agentAccess) : [];
-  const showPlayer1 = activeAgents.includes('player1');
-  const showPlayer2 = activeAgents.includes('player2');
-  elements.llmTracePlayer1.classList.toggle('visually-hidden', !showPlayer1);
-  elements.llmTracePlayer2.classList.toggle('visually-hidden', !showPlayer2);
-  if (!showPlayer1) {
-    elements.llmTracePlayer1Log.textContent = '';
-  }
-  if (!showPlayer2) {
-    elements.llmTracePlayer2Log.textContent = '';
+  if (!roomSession.agentAccess) {
+    llmRuntime.traces.player1 = 'Idle';
+    llmRuntime.traces.player2 = 'Idle';
   }
 }
 
@@ -652,11 +631,7 @@ function normalizeEndpoint(endpoint, path) {
 }
 
 function getProviderDisplayName() {
-  return llmSettings.provider === 'openrouter'
-    ? 'OpenRouter'
-    : llmSettings.provider === 'ollama'
-      ? 'Ollama'
-      : 'vLLM';
+  return (PROVIDER_OPTIONS[llmSettings.provider] || PROVIDER_OPTIONS.openrouter).label;
 }
 
 function parseProviderMove(content, fallbackReasoning = '', toolCalls = null) {
@@ -683,7 +658,7 @@ async function requestProviderMove(playerKey, turnState) {
   ].join('\n');
 
   if (llmSettings.provider === 'openrouter') {
-    const response = await fetch(normalizeEndpoint(llmSettings.endpoint || 'https://openrouter.ai/api/v1', '/chat/completions'), {
+    const response = await fetch(normalizeEndpoint(OPENROUTER_API_BASE, '/chat/completions'), {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${llmSettings.apiKey}`,
@@ -930,7 +905,10 @@ function enterGameScreen() {
 }
 
 function returnToMenu() {
-  if (!roomSession.active && game.state === 'running') {
+  setVolumePopoverVisible(false);
+  if (roomSession.active) {
+    leaveRoomSession();
+  } else if (game.state === 'running') {
     game.pause();
   }
   showScreen('home');
@@ -1047,7 +1025,6 @@ function setThemeCss(themeKey) {
   root.style.setProperty('--muted', theme.muted);
   root.style.setProperty('--accent', theme.accent);
   root.style.setProperty('--control-fill', theme.controlFill);
-  elements.themeLabel.textContent = theme.label;
 }
 
 function fillSelect(select, options) {
@@ -1615,13 +1592,7 @@ class DuelSnakesGame {
   updateUi() {
     elements.p1Score.textContent = String(this.score.player1);
     elements.p2Score.textContent = String(this.score.player2);
-    elements.drawScore.textContent = String(this.score.draws);
     elements.roundClock.textContent = formatTime(this.elapsedMs);
-    elements.roundNumber.textContent = String(this.roundCount);
-    elements.stateLabel.textContent = formatState(this.state, this.winner);
-    elements.streakLabel.textContent = this.score.streakOwner ? `${this.score.streakOwner} x${this.score.streakCount}` : 'None';
-    elements.togglePlayButton.textContent = this.state === 'running' ? 'Pause Round' : this.winner ? 'Play Again' : 'Start Round';
-    elements.arenaSummary.textContent = `${this.settings.cellCount}x${this.settings.cellCount} arena at ${this.settings.speed} tps • longest ${formatTime(this.score.longestRoundMs)}`;
   }
 
   renderOverlay() {
@@ -2038,6 +2009,12 @@ function updateMusicControls(music) {
   const musicSettings = music.getSettings();
   elements.musicVolume.value = String(Math.round(musicSettings.volume * 100));
   elements.musicToggleButton.setAttribute('aria-label', music.getButtonLabel());
+  elements.musicToggleButton.setAttribute('aria-pressed', musicSettings.volume <= 0.001 ? 'true' : 'false');
+}
+
+function setVolumePopoverVisible(visible) {
+  elements.musicVolumePopover.classList.toggle('visually-hidden', !visible);
+  elements.musicToggleButton.setAttribute('aria-expanded', visible ? 'true' : 'false');
 }
 
 function setStatus(message) {
@@ -2063,13 +2040,11 @@ async function toggleFullscreen() {
   try {
     if (document.fullscreenElement) {
       await document.exitFullscreen();
-      elements.fullscreenButton.textContent = 'Fullscreen';
       setStatus('Exited fullscreen mode.');
       clearStatusAfterDelay();
       return;
     }
     await elements.canvasShell.requestFullscreen();
-    elements.fullscreenButton.textContent = 'Exit Fullscreen';
     setStatus('Fullscreen enabled.');
     clearStatusAfterDelay();
   } catch {
@@ -2089,6 +2064,7 @@ updateForm(settings);
 const music = new MusicPlayer(musicSettings);
 music.bindUserGesture();
 updateMusicControls(music);
+setVolumePopoverVisible(false);
 
 const audio = new AudioEngine();
 audio.setEnabled(settings.soundEnabled);
@@ -2149,15 +2125,6 @@ function updateLocalTextBoard() {
 function updateRoomMeta() {
   elements.roomStatus.textContent = roomSession.active ? roomSession.roomCode : '';
   elements.roomStatus.classList.toggle('is-visible', roomSession.active);
-  const controllerSummary = roomSession.active
-    ? `${roomSession.controllers.player1} vs ${roomSession.controllers.player2}`
-    : 'local';
-  const timingSummary = roomSession.active && hasAgentSeat(roomSession.controllers)
-    ? ` • Agent timing: ${roomSession.agentTiming === 'realtime' ? 'realtime' : 'turn-based'}`
-    : '';
-  elements.roomRole.textContent = `Role: ${roomSession.role} • Mode: ${controllerSummary}${timingSummary}`;
-  const durability = roomSession.lastSnapshot?.durable ? 'durable' : roomSession.active ? 'ephemeral fallback' : 'browser-local';
-  elements.roomBackend.textContent = `Backend: ${roomSession.backend} • ${durability}`;
 }
 
 function stopRoomPolling() {
@@ -2240,6 +2207,25 @@ function leaveRoomSession() {
   game.resetRound();
   updateRoomMeta();
   updateLocalTextBoard();
+}
+
+async function startCurrentMatch() {
+  if (roomSession.active) {
+    if (game.state === 'running') {
+      return;
+    }
+    try {
+      await sendRoomAction({ type: 'start' });
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Unable to start room round.');
+    }
+    return;
+  }
+
+  if (game.state !== 'running') {
+    game.start();
+    updateLocalTextBoard();
+  }
 }
 
 async function sendRoomAction(action) {
@@ -2427,15 +2413,19 @@ elements.resetScoresButton.addEventListener('click', () => {
   clearStatusAfterDelay();
 });
 
-elements.fullscreenButton.addEventListener('click', () => {
-  toggleFullscreen();
+elements.musicToggleButton.addEventListener('click', () => {
+  setVolumePopoverVisible(elements.musicVolumePopover.classList.contains('visually-hidden'));
 });
 
-elements.musicToggleButton.addEventListener('click', () => {
-  music.toggleMute();
-  musicSettings = sanitizeMusicSettings(music.getSettings());
-  saveMusicSettings(musicSettings);
-  updateMusicControls(music);
+document.addEventListener('pointerdown', (event) => {
+  const target = event.target;
+  if (!(target instanceof Node)) {
+    return;
+  }
+  if (elements.musicToggleButton.contains(target) || elements.musicVolumePopover.contains(target)) {
+    return;
+  }
+  setVolumePopoverVisible(false);
 });
 
 elements.musicVolume.addEventListener('input', (event) => {
@@ -2476,33 +2466,41 @@ elements.backFromJoinButton.addEventListener('click', returnToMenu);
 elements.backFromConfigButton.addEventListener('click', returnToMenu);
 elements.returnHomeButton.addEventListener('click', returnToMenu);
 
-elements.playHumanButton.addEventListener('click', () => {
+elements.playLocalButton.addEventListener('click', () => {
   resetLocalGame();
   enterGameScreen();
-  setStatus('Local human versus human ready.');
+  void startCurrentMatch();
+  setStatus('Two-player local match ready.');
   clearStatusAfterDelay();
 });
 
-elements.automationBotVsBotButton.addEventListener('click', async () => {
+elements.playBotButton.addEventListener('click', async () => {
   try {
-    await createConfiguredRoomSession({ player1: 'bot', player2: 'bot' }, 'turn-based');
+    await createConfiguredRoomSession({ player1: 'human', player2: 'bot' }, 'turn-based');
     enterGameScreen();
-    setStatus('Bot versus bot room ready.');
+    void startCurrentMatch();
+    setStatus('Play versus bot ready.');
     clearStatusAfterDelay();
   } catch (error) {
-    setStatus(error instanceof Error ? error.message : 'Unable to start bot versus bot.');
+    setStatus(error instanceof Error ? error.message : 'Unable to start play versus bot.');
   }
 });
 
-elements.automationAgentVsBotButton.addEventListener('click', async () => {
+elements.automationPlayVsLlmButton.addEventListener('click', async () => {
   try {
-    await createConfiguredRoomSession({ player1: 'agent', player2: 'bot' }, getAutomationTiming());
+    await createConfiguredRoomSession({ player1: 'human', player2: 'agent' }, getAutomationTiming());
     enterGameScreen();
-    setStatus('Agent versus bot room ready.');
+    void startCurrentMatch();
+    setStatus('Play versus LLM ready.');
     clearStatusAfterDelay();
   } catch (error) {
-    setStatus(error instanceof Error ? error.message : 'Unable to start agent versus bot.');
+    setStatus(error instanceof Error ? error.message : 'Unable to start play versus LLM.');
   }
+});
+
+elements.llmProvider.addEventListener('change', () => {
+  updateLlmProviderUi();
+  setLlmProviderStatus(`${(PROVIDER_OPTIONS[elements.llmProvider.value] || PROVIDER_OPTIONS.openrouter).label} selected.`);
 });
 
 elements.saveLlmProviderButton.addEventListener('click', async () => {
@@ -2511,9 +2509,10 @@ elements.saveLlmProviderButton.addEventListener('click', async () => {
       provider: elements.llmProvider.value,
       endpoint: elements.llmEndpoint.value.trim(),
       apiKey: elements.llmApiKey.value.trim(),
-      model: elements.llmModel.value.trim() || 'openai/gpt-4.1-mini',
+      model: elements.llmModel.value.trim() || (PROVIDER_OPTIONS[elements.llmProvider.value] || PROVIDER_OPTIONS.openrouter).modelPlaceholder,
     };
     await saveLlmSettings(llmSettings);
+    llmSettings = await loadLlmSettings();
     syncLlmProviderInputs();
     setLlmProviderStatus(`${getProviderDisplayName()} settings cached locally.`);
   } catch (error) {
@@ -2527,9 +2526,10 @@ elements.clearLlmProviderButton.addEventListener('click', async () => {
       provider: elements.llmProvider.value,
       endpoint: elements.llmEndpoint.value.trim(),
       apiKey: '',
-      model: elements.llmModel.value.trim() || 'openai/gpt-4.1-mini',
+      model: elements.llmModel.value.trim() || (PROVIDER_OPTIONS[elements.llmProvider.value] || PROVIDER_OPTIONS.openrouter).modelPlaceholder,
     };
     await saveLlmSettings(llmSettings);
+    llmSettings = await loadLlmSettings();
     syncLlmProviderInputs();
     setLlmProviderStatus(`${getProviderDisplayName()} API key cleared from local cache.`);
   } catch (error) {
@@ -2537,23 +2537,33 @@ elements.clearLlmProviderButton.addEventListener('click', async () => {
   }
 });
 
-elements.automationAgentVsAgentButton.addEventListener('click', async () => {
+elements.automationLlmVsLlmButton.addEventListener('click', async () => {
   try {
     await createConfiguredRoomSession({ player1: 'agent', player2: 'agent' }, getAutomationTiming());
     enterGameScreen();
-    setStatus('Agent versus agent room ready.');
+    void startCurrentMatch();
+    setStatus('LLM versus LLM ready.');
     clearStatusAfterDelay();
   } catch (error) {
-    setStatus(error instanceof Error ? error.message : 'Unable to start agent versus agent.');
+    setStatus(error instanceof Error ? error.message : 'Unable to start LLM versus LLM.');
   }
 });
 
-elements.togglePlayButton.addEventListener('click', () => {
-  handleTogglePlay();
+elements.automationLlmVsBotButton.addEventListener('click', async () => {
+  try {
+    await createConfiguredRoomSession({ player1: 'agent', player2: 'bot' }, getAutomationTiming());
+    enterGameScreen();
+    void startCurrentMatch();
+    setStatus('LLM versus bot ready.');
+    clearStatusAfterDelay();
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : 'Unable to start LLM versus bot.');
+  }
 });
 
 elements.restartButton.addEventListener('click', () => {
   handleResetRound();
+  void startCurrentMatch();
   setStatus('Round reset.');
   clearStatusAfterDelay(1200);
 });
@@ -2562,6 +2572,7 @@ elements.createRoomButton.addEventListener('click', async () => {
   try {
     const payload = await createConfiguredRoomSession({ player1: 'human', player2: 'human' }, 'turn-based');
     enterGameScreen();
+    void startCurrentMatch();
     setStatus(`Room ${payload.room.roomCode} created.`);
     clearStatusAfterDelay();
   } catch (error) {
@@ -2583,17 +2594,12 @@ elements.joinRoomButton.addEventListener('click', async () => {
     applyRoomSnapshot(payload.room);
     startRoomPolling();
     enterGameScreen();
+    void startCurrentMatch();
     setStatus(`Joined room ${payload.room.roomCode} as ${payload.role}.`);
     clearStatusAfterDelay();
   } catch (error) {
     setStatus(error instanceof Error ? error.message : 'Unable to join room.');
   }
-});
-
-elements.leaveRoomButton.addEventListener('click', () => {
-  leaveRoomSession();
-  setStatus('Left room mode.');
-  clearStatusAfterDelay();
 });
 
 elements.sendCommandButton.addEventListener('click', () => {
@@ -2648,9 +2654,10 @@ elements.apiDocsButton.addEventListener('click', async () => {
       '',
       'modes:',
       `- human-vs-human rooms: create room or join room`,
+      `- play-vs-bot: ${schema.trainingModes.humanVsBot}`,
+      `- play-vs-llm: ${schema.trainingModes.humanVsAgent}`,
       `- llm-vs-bot: ${schema.trainingModes.llmVsBot}`,
       `- llm-vs-llm: ${schema.trainingModes.llmVsLlm}`,
-      `- bot-vs-bot: ${schema.trainingModes.botVsBot}`,
       `- realtime-agent timing: ${schema.roomOptions.agentTiming.join(', ')}`,
       '',
       ...schema.commands,
@@ -2673,7 +2680,6 @@ elements.touchButtons.forEach((button) => {
 });
 
 document.addEventListener('fullscreenchange', () => {
-  elements.fullscreenButton.textContent = document.fullscreenElement === elements.canvasShell ? 'Exit Fullscreen' : 'Fullscreen';
   game.resizeCanvas();
 });
 

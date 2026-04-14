@@ -22,9 +22,17 @@ body {
   background: #000;
 }
 
-body {
+body,
+button,
+input,
+select,
+textarea,
+pre {
   font-family: 'Press Start 2P', 'Courier New', monospace;
   font-weight: 700;
+}
+
+body {
   color: var(--text);
   overflow-x: hidden;
 }
@@ -83,6 +91,7 @@ button {
 }
 
 .music-dock {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -245,6 +254,13 @@ button {
 
 .volume-popover {
   min-width: 132px;
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  padding: 12px;
+  border: 1px solid var(--line-strong);
+  background: rgba(0, 0, 0, 0.96);
+  z-index: 5;
 }
 
 .screen-menu,
@@ -369,6 +385,26 @@ button {
 .control-row label,
 .toggle-row label {
   color: var(--muted);
+}
+
+.provider-current {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line-strong);
+  background: #000;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  line-height: 1.8;
+}
+
+.provider-current[data-provider='openrouter'] {
+  border-color: rgba(255, 255, 255, 0.7);
+}
+
+.provider-current[data-provider='ollama'],
+.provider-current[data-provider='vllm'] {
+  border-style: dashed;
 }
 
 input[type='color'] {
@@ -524,13 +560,13 @@ input[type='range']::-moz-range-thumb {
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
 }
 
 .hud-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   flex: 1;
 }
 
@@ -557,28 +593,9 @@ input[type='range']::-moz-range-thumb {
 }
 
 .game-top-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  justify-content: end;
-}
-
-.game-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.pill {
-  min-height: 42px;
-  padding: 10px 14px;
-  border: 1px solid var(--line);
-  background: #000;
-  color: var(--muted);
-}
-
-.pill strong {
-  color: #fff;
+  display: grid;
+  gap: 12px;
+  align-content: start;
 }
 
 .canvas-shell {
@@ -661,11 +678,9 @@ input[type='range']::-moz-range-thumb {
   aspect-ratio: 1;
 }
 
-.game-instructions,
 .touch-panel {
   display: grid;
   gap: 14px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .touch-panel {
@@ -674,38 +689,6 @@ input[type='range']::-moz-range-thumb {
 
 .touch-card {
   padding: 16px;
-}
-
-.llm-trace-panel {
-  display: grid;
-  gap: 14px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.llm-trace-window {
-  border: 1px solid var(--line);
-  background: var(--panel-2);
-  min-height: 160px;
-}
-
-.llm-trace-window header {
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--line);
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.16em;
-  font-size: 0.78rem;
-}
-
-.llm-trace-window pre {
-  margin: 0;
-  padding: 14px;
-  max-height: 220px;
-  overflow: auto;
-  white-space: pre-wrap;
-  color: #fff;
-  font-size: 0.82rem;
-  line-height: 1.5;
 }
 
 .touch-card span {
@@ -768,11 +751,9 @@ input[type='range']::-moz-range-thumb {
 @media (max-width: 980px) {
   .mono-form,
   .game-header,
-  .game-instructions,
   .touch-panel,
   .menu-grid,
-  .automation-actions,
-  .llm-trace-panel {
+  .automation-actions {
     grid-template-columns: 1fr;
   }
 
